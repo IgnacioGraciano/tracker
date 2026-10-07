@@ -1,0 +1,2863 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>TrackerPro</title>
+    <meta name="theme-color" content="#1F2937">
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- Librerías para el Gráfico y los Porcentajes -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
+    
+    <!-- Librerías de Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
+</head>
+<body class="bg-gray-900 text-white font-sans antialiased pb-20 md:pb-0">
+
+    <nav class="bg-gray-800 p-4 shadow-lg border-b border-gray-700 sticky top-0 z-50">
+        <div class="container mx-auto flex justify-between items-center">
+            <h1 class="text-xl md:text-2xl font-bold text-blue-400"><i class="fas fa-chart-pie mr-2"></i>TrackerPro</h1>
+            <button onclick="toggleModal('add-modal')" class="bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded font-semibold text-sm transition shadow-lg">
+                <i class="fas fa-plus md:mr-1"></i> <span class="hidden md:inline">Transacción</span>
+            </button>
+        </div>
+    </nav>
+
+    <main class="container mx-auto p-4 mt-4">
+        <div class="flex flex-col-reverse md:flex-row gap-6">
+
+            <!-- Contenido de cada página -->
+            <div class="flex-1 min-w-0">
+
+                <!-- ================= PANEL GENERAL ================= -->
+                <div id="page-dashboard" class="page-section">
+                    <!-- Sección Superior: Resumen y Gráfico -->
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+                        <!-- Patrimonio Total (clic para ver detalle: invertido, P/L, etc.) -->
+                        <button type="button" onclick="toggleModal('patrimonio-modal')" class="text-left bg-gray-800 p-6 rounded-xl shadow-md border border-gray-700 hover:border-gray-600 transition flex flex-col justify-center">
+                            <div class="flex items-start justify-between">
+                                <h3 class="text-gray-400 text-xs font-semibold uppercase tracking-wider">Patrimonio Total</h3>
+                                <span class="text-xl leading-none">💰</span>
+                            </div>
+                            <p class="text-3xl md:text-4xl font-bold mt-2 text-white" id="total-value-usd">$0.00</p>
+                            <p class="text-sm text-gray-400 mt-1" id="total-value-ars">ARS —</p>
+                            <p class="text-xs text-gray-500 mt-3" id="total-assets-count">0 inversiones activas</p>
+                        </button>
+
+                        <!-- Rendimiento del día (vs. el último registro guardado) -->
+                        <div class="bg-gray-800 p-6 rounded-xl shadow-md border border-gray-700 flex flex-col justify-center">
+                            <div class="flex items-start justify-between">
+                                <h3 class="text-gray-400 text-xs font-semibold uppercase tracking-wider">Rendimiento Diario</h3>
+                                <span class="text-xl leading-none">📈</span>
+                            </div>
+                            <p class="text-3xl md:text-4xl font-bold mt-2 text-gray-400" id="daily-change-pct">—</p>
+                            <p class="text-sm text-gray-400 mt-1" id="daily-change-amount"></p>
+                            <p class="text-xs text-gray-500 mt-3" id="daily-change-ref">Cargando...</p>
+                        </div>
+
+                        <!-- Gráfico de Diversificación -->
+                        <div class="bg-gray-800 p-4 rounded-xl shadow-md border border-gray-700 flex flex-col items-center justify-center">
+                            <h3 class="text-gray-400 text-sm font-semibold uppercase mb-4 w-full text-left">Diversificación</h3>
+                            <div class="relative w-56 h-56">
+                                <canvas id="portfolioChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Evolución Patrimonial -->
+                    <div class="bg-gray-800 p-4 md:p-6 rounded-xl shadow-md border border-gray-700 mb-8">
+                        <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+                            <h3 class="text-base font-bold flex items-center gap-2">
+                                <i class="fas fa-chart-line text-blue-400"></i> Evolución Patrimonial
+                                <span class="text-xs font-normal text-gray-500" id="evolution-count">0 registros</span>
+                            </h3>
+                            <div class="flex bg-gray-900 rounded-lg p-1 text-xs font-semibold">
+                                <button type="button" onclick="setEvolutionMode('total')" id="btn-mode-total" class="px-3 py-1.5 rounded-md transition">Patrimonio</button>
+                                <button type="button" onclick="setEvolutionMode('ganancias')" id="btn-mode-ganancias" class="px-3 py-1.5 rounded-md transition">Ganancias</button>
+                            </div>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-2 mb-4 text-xs">
+                            <button type="button" onclick="setEvolutionRange('1M')" id="btn-range-1M" class="range-btn px-3 py-1 rounded-full transition">1M</button>
+                            <button type="button" onclick="setEvolutionRange('6M')" id="btn-range-6M" class="range-btn px-3 py-1 rounded-full transition">6M</button>
+                            <button type="button" onclick="setEvolutionRange('1A')" id="btn-range-1A" class="range-btn px-3 py-1 rounded-full transition">1A</button>
+                            <button type="button" onclick="setEvolutionRange('YTD')" id="btn-range-YTD" class="range-btn px-3 py-1 rounded-full transition">YTD</button>
+                            <button type="button" onclick="setEvolutionRange('MAX')" id="btn-range-MAX" class="range-btn px-3 py-1 rounded-full transition">Max</button>
+                            <button type="button" onclick="setEvolutionRange('CUSTOM')" id="btn-range-CUSTOM" class="range-btn px-3 py-1 rounded-full transition">Otro</button>
+                            <div id="custom-range-inputs" class="hidden items-center gap-2 ml-1">
+                                <input type="date" id="custom-range-start" class="bg-gray-900 border border-gray-600 rounded px-2 py-1 text-xs text-white">
+                                <span class="text-gray-500">a</span>
+                                <input type="date" id="custom-range-end" class="bg-gray-900 border border-gray-600 rounded px-2 py-1 text-xs text-white">
+                                <button type="button" onclick="applyCustomRange()" class="bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded text-xs font-semibold">Aplicar</button>
+                            </div>
+                        </div>
+                        <div class="relative h-64 md:h-72">
+                            <canvas id="evolutionChart"></canvas>
+                        </div>
+                        <p class="text-[11px] text-gray-500 mt-3 text-center" id="evolution-empty-msg"></p>
+                    </div>
+                </div>
+
+                <!-- ================= INVERSIONES ================= -->
+                <div id="page-inversiones" class="page-section hidden">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-8">
+                        <div class="bg-gray-800 p-6 rounded-xl shadow-md border border-gray-700">
+                            <h3 class="text-gray-400 text-xs font-semibold uppercase tracking-wider">Valor Actual</h3>
+                            <p class="text-3xl md:text-4xl font-bold mt-2 text-white" id="inv-valor-actual">$0.00</p>
+                            <p class="text-xs text-gray-500 mt-3" id="inv-invertido-ref">Invertido: $0.00</p>
+                        </div>
+                        <div class="bg-gray-800 p-6 rounded-xl shadow-md border border-gray-700">
+                            <h3 class="text-gray-400 text-xs font-semibold uppercase tracking-wider">Rendimiento Total</h3>
+                            <p class="text-3xl md:text-4xl font-bold mt-2" id="inv-rendimiento-pct">0.00%</p>
+                            <p class="text-xs text-gray-500 mt-3" id="inv-rendimiento-monto">$0.00</p>
+                        </div>
+                    </div>
+
+                    <!-- Tabla de Posiciones -->
+                    <div class="bg-gray-800 rounded-xl shadow-md overflow-hidden border border-gray-700 mb-8">
+                        <div class="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-800">
+                            <h2 class="text-lg font-bold">Posiciones Abiertas</h2>
+                            <button onclick="loadPrices()" class="text-sm text-blue-400 hover:text-blue-300 bg-gray-700 px-3 py-1 rounded-full transition-all" id="btn-update">
+                                <i class="fas fa-sync-alt mr-1"></i> Actualizar
+                            </button>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left border-collapse whitespace-nowrap table-fixed">
+                                <colgroup>
+                                    <col style="width:22%">
+                                    <col style="width:12%">
+                                    <col style="width:12%">
+                                    <col style="width:13%">
+                                    <col style="width:12%">
+                                    <col style="width:15%">
+                                    <col style="width:14%">
+                                </colgroup>
+                                <thead>
+                                    <tr class="bg-gray-900 text-gray-400 text-xs uppercase tracking-wider select-none">
+                                        <th class="p-4 font-semibold cursor-pointer hover:text-white" onclick="sortData('ticker')">Activo <i class="fas fa-sort ml-1"></i></th>
+                                        <th class="p-4 font-semibold text-center cursor-pointer hover:text-white" onclick="sortData('currentPrice')">Precio Actual <i class="fas fa-sort ml-1"></i></th>
+                                        <th class="p-4 font-semibold text-center cursor-pointer hover:text-white" onclick="sortData('invested')">Invertido <i class="fas fa-sort ml-1"></i></th>
+                                        <th class="p-4 font-semibold text-center cursor-pointer hover:text-white" onclick="sortData('value')">Valor Total <i class="fas fa-sort ml-1"></i></th>
+                                        <th class="p-4 font-semibold text-center">Var. Diaria</th>
+                                        <th class="p-4 font-semibold text-center cursor-pointer hover:text-white" onclick="sortData('pl')">P/L <i class="fas fa-sort ml-1"></i></th>
+                                        <th class="p-4 font-semibold text-center">Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="portfolio-table" class="text-sm divide-y divide-gray-700">
+                                    <!-- Generado por JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Cash (USDT/USDC) -->
+                    <div class="bg-gray-800 rounded-xl shadow-md overflow-hidden border border-gray-700 mb-6">
+                        <div class="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-800">
+                            <div>
+                                <h2 class="text-lg font-bold">Cash (USDT/USDC)</h2>
+                                <p class="text-xs text-gray-500 mt-0.5" id="cash-total-summary">Total: $0.00</p>
+                            </div>
+                            <button onclick="toggleModal('cash-modal')" class="text-sm text-blue-400 hover:text-blue-300 bg-gray-700 px-3 py-1 rounded-full transition-all">
+                                <i class="fas fa-plus mr-1"></i> Agregar Cash
+                            </button>
+                        </div>
+                        <div id="cash-list" class="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                            <!-- Generado por JS -->
+                        </div>
+                        <p class="text-[11px] text-gray-500 px-4 pb-4" id="cash-empty-msg"></p>
+                    </div>
+                </div>
+
+                <!-- ================= CRIPTO DCA ================= -->
+                <div id="page-dca" class="page-section hidden">
+                    <div class="bg-gray-800 rounded-xl shadow-md overflow-hidden border border-gray-700 mb-6">
+                        <div class="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-800">
+                            <div>
+                                <h2 class="text-lg font-bold">Cripto DCA</h2>
+                                <p class="text-xs text-gray-500 mt-0.5">Compras automáticas y recurrentes, descontadas de tu Cash</p>
+                            </div>
+                            <button onclick="openDcaModal()" class="text-sm text-blue-400 hover:text-blue-300 bg-gray-700 px-3 py-1 rounded-full transition-all">
+                                <i class="fas fa-plus mr-1"></i> Nuevo Plan
+                            </button>
+                        </div>
+                        <div id="dca-list" class="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <!-- Generado por JS -->
+                        </div>
+                        <p class="text-[11px] text-gray-500 px-4 pb-4" id="dca-empty-msg"></p>
+                    </div>
+                </div>
+
+                <!-- ================= AHORRO (objetivos) ================= -->
+                <div id="page-ahorro" class="page-section hidden">
+                    <div class="bg-gray-800 rounded-xl shadow-md overflow-hidden border border-gray-700 mb-6">
+                        <div class="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-800">
+                            <div>
+                                <h2 class="text-lg font-bold">Ahorro</h2>
+                                <p class="text-xs text-gray-500 mt-0.5" id="goals-total-summary">Total ahorrado: $0.00</p>
+                            </div>
+                            <button onclick="openGoalModal()" class="text-sm text-blue-400 hover:text-blue-300 bg-gray-700 px-3 py-1 rounded-full transition-all">
+                                <i class="fas fa-plus mr-1"></i> Nuevo Objetivo
+                            </button>
+                        </div>
+                        <div id="goals-list" class="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <!-- Generado por JS -->
+                        </div>
+                        <p class="text-[11px] text-gray-500 px-4 pb-4" id="goals-empty-msg"></p>
+                    </div>
+                </div>
+
+                <!-- ================= PRÉSTAMOS (deudas) ================= -->
+                <div id="page-deudas" class="page-section hidden">
+                    <div class="bg-gray-800 rounded-xl shadow-md overflow-hidden border border-gray-700 mb-6">
+                        <div class="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-800">
+                            <div>
+                                <h2 class="text-lg font-bold">Préstamos</h2>
+                                <p class="text-xs text-gray-500 mt-0.5" id="loans-total-summary">Deuda total: $0.00</p>
+                            </div>
+                            <button onclick="openLoanModal()" class="text-sm text-blue-400 hover:text-blue-300 bg-gray-700 px-3 py-1 rounded-full transition-all">
+                                <i class="fas fa-plus mr-1"></i> Nuevo Préstamo
+                            </button>
+                        </div>
+                        <div id="loans-list" class="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <!-- Generado por JS -->
+                        </div>
+                        <p class="text-[11px] text-gray-500 px-4 pb-4" id="loans-empty-msg"></p>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Barra de navegación (a la derecha en desktop, arriba como tabs en mobile) -->
+            <aside class="w-full md:w-52 flex-shrink-0">
+                <div class="flex md:flex-col gap-2 overflow-x-auto md:overflow-visible bg-gray-800 border border-gray-700 rounded-xl p-2">
+                    <button type="button" onclick="showPage('dashboard')" id="nav-dashboard" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg whitespace-nowrap text-sm font-semibold transition">
+                        <i class="fas fa-chart-pie w-4 text-center"></i> Panel General
+                    </button>
+                    <button type="button" onclick="showPage('inversiones')" id="nav-inversiones" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg whitespace-nowrap text-sm font-semibold transition">
+                        <i class="fas fa-chart-line w-4 text-center"></i> Inversiones
+                    </button>
+                    <button type="button" onclick="showPage('dca')" id="nav-dca" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg whitespace-nowrap text-sm font-semibold transition">
+                        <i class="fab fa-bitcoin w-4 text-center"></i> Cripto DCA
+                    </button>
+                    <button type="button" onclick="showPage('ahorro')" id="nav-ahorro" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg whitespace-nowrap text-sm font-semibold transition">
+                        <i class="fas fa-piggy-bank w-4 text-center"></i> Ahorro
+                    </button>
+                    <button type="button" onclick="showPage('deudas')" id="nav-deudas" class="nav-link flex items-center gap-2 px-3 py-2 rounded-lg whitespace-nowrap text-sm font-semibold transition">
+                        <i class="fas fa-hand-holding-usd w-4 text-center"></i> Préstamos
+                    </button>
+                </div>
+            </aside>
+
+        </div>
+    </main>
+
+    <!-- Modal para Agregar Compra Inicial -->
+    <div id="add-modal" class="fixed inset-0 bg-black bg-opacity-70 hidden flex justify-center items-end md:items-center z-[100] transition-opacity">
+        <div class="bg-gray-800 w-full md:w-[26rem] md:rounded-lg rounded-t-2xl border border-gray-700 shadow-2xl p-6 max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold">Registrar Movimiento</h2>
+                <button onclick="toggleModal('add-modal')" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+            </div>
+
+            <!-- Selector de modo de carga -->
+            <div class="flex bg-gray-900 rounded-lg p-1 text-xs font-semibold mb-5">
+                <button type="button" onclick="setTxMode('usd')" id="btn-txmode-usd" class="flex-1 px-2 py-1.5 rounded-md transition">USD</button>
+                <button type="button" onclick="setTxMode('cedear')" id="btn-txmode-cedear" class="flex-1 px-2 py-1.5 rounded-md transition">CEDEAR ($)</button>
+                <button type="button" onclick="setTxMode('cash')" id="btn-txmode-cash" class="flex-1 px-2 py-1.5 rounded-md transition">Cash</button>
+            </div>
+
+            <form id="add-form" onsubmit="addTransaction(event)">
+
+                <!-- MODO: Acción o cripto cargada directo en dólares -->
+                <div id="txmode-usd-fields">
+                    <div class="mb-4">
+                        <label class="block text-sm text-gray-400 mb-1">Ticker (Ej: SPY, AAPL, bitcoin)</label>
+                        <input type="text" id="ticker" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500 uppercase">
+                    </div>
+                    <div class="mb-4">
+                        <label class="block text-sm text-gray-400 mb-1">Tipo de Activo</label>
+                        <select id="type" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                            <option value="stock">Acción / Cedear (ya en USD)</option>
+                            <option value="crypto">Criptomoneda (CoinGecko)</option>
+                        </select>
+                    </div>
+                    <div class="mb-4 flex gap-4">
+                        <div class="w-1/2">
+                            <label class="block text-sm text-gray-400 mb-1">Cantidad</label>
+                            <input type="number" step="any" id="shares" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                        </div>
+                        <div class="w-1/2">
+                            <label class="block text-sm text-gray-400 mb-1">Precio Unit. (USD)</label>
+                            <input type="number" step="any" id="price" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- MODO: CEDEAR comprado en pesos (calcula acciones equivalentes y precio solo) -->
+                <div id="txmode-cedear-fields" class="hidden">
+                    <div class="mb-4">
+                        <label class="block text-sm text-gray-400 mb-1">Ticker del subyacente (Ej: AAPL)</label>
+                        <input type="text" id="cedear-ticker" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500 uppercase">
+                    </div>
+                    <div class="mb-4 flex gap-4">
+                        <div class="w-1/2">
+                            <label class="block text-sm text-gray-400 mb-1">Cant. de CEDEARs</label>
+                            <input type="number" step="any" id="cedear-cantidad" oninput="updateCedearPreview()" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                        </div>
+                        <div class="w-1/2">
+                            <label class="block text-sm text-gray-400 mb-1">Ratio (X Cedears = 1 acción)</label>
+                            <input type="number" step="any" id="cedear-ratio" oninput="updateCedearPreview()" placeholder="Ej: 10" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                        </div>
+                    </div>
+                    <div class="mb-4">
+                        <label class="block text-sm text-gray-400 mb-1">Monto total pagado (ARS)</label>
+                        <input type="number" step="any" id="cedear-monto-ars" oninput="updateCedearPreview()" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                    </div>
+                    <div class="mb-4">
+                        <label class="block text-sm text-gray-400 mb-1">Dólar CCL usado (editable)</label>
+                        <input type="number" step="any" id="cedear-ccl" oninput="updateCedearPreview()" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                        <p class="text-[11px] text-gray-500 mt-1">Se autocompleta con el CCL del momento. Si la compra fue otro día, cambialo por el CCL de esa fecha.</p>
+                    </div>
+                    <div id="cedear-preview" class="mb-4 text-xs bg-gray-900 border border-gray-700 rounded-lg p-3 text-gray-300">
+                        Completá los campos para ver el cálculo.
+                    </div>
+                </div>
+
+                <!-- MODO: Cash USDT/USDC -->
+                <div id="txmode-cash-fields" class="hidden">
+                    <div class="mb-4">
+                        <label class="block text-sm text-gray-400 mb-1">Monto (USD)</label>
+                        <input type="number" step="any" id="cash-amount" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                    </div>
+                    <div class="mb-4 flex gap-4">
+                        <div class="w-1/2">
+                            <label class="block text-sm text-gray-400 mb-1">Moneda</label>
+                            <select id="cash-currency" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                                <option value="USDT">USDT</option>
+                                <option value="USDC">USDC</option>
+                            </select>
+                        </div>
+                        <div class="w-1/2">
+                            <label class="block text-sm text-gray-400 mb-1">Plataforma</label>
+                            <select id="cash-platform" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                                <option value="Binance">Binance</option>
+                                <option value="Nexo">Nexo</option>
+                                <option value="Otra">Otra</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mb-4">
+                        <label class="block text-sm text-gray-400 mb-1">Tasa de interés anual (%, opcional)</label>
+                        <input type="number" step="any" id="cash-rate" value="0" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                    </div>
+                </div>
+
+                <div class="mb-6">
+                    <label class="block text-sm text-gray-400 mb-1" id="date-field-label">Fecha (opcional)</label>
+                    <input type="datetime-local" id="date" onclick="this.showPicker?.()" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500 cursor-pointer">
+                    <p class="text-[11px] text-gray-500 mt-1">Si la dejás vacía, se usa la fecha y hora actual.</p>
+                </div>
+                <button type="submit" id="btn-save" class="w-full bg-blue-600 hover:bg-blue-700 py-3 rounded-lg font-bold text-lg transition shadow-lg">Guardar</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal para Agregar Cash (USDT/USDC) -->
+    <div id="cash-modal" class="fixed inset-0 bg-black bg-opacity-70 hidden flex justify-center items-end md:items-center z-[100] transition-opacity">
+        <div class="bg-gray-800 w-full md:w-96 md:rounded-lg rounded-t-2xl border border-gray-700 shadow-2xl p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold">Agregar Cash</h2>
+                <button onclick="toggleModal('cash-modal')" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+            </div>
+            <form onsubmit="addCashHolding(event)">
+                <div class="mb-4">
+                    <label class="block text-sm text-gray-400 mb-1">Monto (USD)</label>
+                    <input type="number" step="any" id="new-cash-amount" required class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                </div>
+                <div class="mb-4 flex gap-4">
+                    <div class="w-1/2">
+                        <label class="block text-sm text-gray-400 mb-1">Moneda</label>
+                        <select id="new-cash-currency" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                            <option value="USDT">USDT</option>
+                            <option value="USDC">USDC</option>
+                        </select>
+                    </div>
+                    <div class="w-1/2">
+                        <label class="block text-sm text-gray-400 mb-1">Plataforma</label>
+                        <select id="new-cash-platform" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                            <option value="Binance">Binance</option>
+                            <option value="Nexo">Nexo</option>
+                            <option value="Otra">Otra</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="mb-6">
+                    <label class="block text-sm text-gray-400 mb-1">Tasa de interés anual (%, opcional)</label>
+                    <input type="number" step="any" id="new-cash-rate" value="0" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                </div>
+                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 py-3 rounded-lg font-bold text-lg transition shadow-lg">Guardar</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal para Nuevo Plan de Cripto DCA -->
+    <div id="dca-modal" class="fixed inset-0 bg-black bg-opacity-70 hidden flex justify-center items-end md:items-center z-[100] transition-opacity">
+        <div class="bg-gray-800 w-full md:w-96 md:rounded-lg rounded-t-2xl border border-gray-700 shadow-2xl p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold" id="dca-modal-title">Nuevo Plan DCA</h2>
+                <button onclick="toggleModal('dca-modal')" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+            </div>
+            <form onsubmit="saveDcaPlan(event)">
+                <input type="hidden" id="dca-edit-id">
+                <div class="mb-4">
+                    <label class="block text-sm text-gray-400 mb-1">Cripto (ID de CoinGecko, ej: bitcoin)</label>
+                    <input type="text" id="new-dca-ticker" required class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500 lowercase">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-sm text-gray-400 mb-1">Monto a invertir por mes (USD)</label>
+                    <input type="number" step="any" id="new-dca-monto" required class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                </div>
+                <div class="mb-6">
+                    <label class="block text-sm text-gray-400 mb-1">Cash de origen (de dónde se descuenta)</label>
+                    <select id="new-dca-cash" required class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                        <!-- Generado por JS -->
+                    </select>
+                    <p class="text-[11px] text-gray-500 mt-1">Tiene que existir al menos un Cash cargado (sección Inversiones).</p>
+                </div>
+                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 py-3 rounded-lg font-bold text-lg transition shadow-lg" id="dca-submit-btn">Crear Plan</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal para Depositar / Retirar de un Cash -->
+    <div id="cash-move-modal" class="fixed inset-0 bg-black bg-opacity-70 hidden flex justify-center items-end md:items-center z-[100] transition-opacity">
+        <div class="bg-gray-800 w-full md:w-96 md:rounded-lg rounded-t-2xl border border-gray-700 shadow-2xl p-6 max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold">Movimiento de Cash</h2>
+                <button onclick="toggleModal('cash-move-modal')" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+            </div>
+            <p class="text-xs text-gray-400 mb-4" id="cash-move-info"></p>
+            <form onsubmit="saveCashMove(event)">
+                <input type="hidden" id="cash-move-id">
+                <div class="mb-4">
+                    <label class="block text-sm text-gray-400 mb-1">Tipo de movimiento</label>
+                    <select id="cash-move-type" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                        <option value="deposit">Depositar (agregar)</option>
+                        <option value="withdraw">Retirar (sacar)</option>
+                    </select>
+                </div>
+                <div class="mb-6">
+                    <label class="block text-sm text-gray-400 mb-1">Monto (USD)</label>
+                    <input type="number" step="any" min="0" id="cash-move-amount" required class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                </div>
+                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 py-3 rounded-lg font-bold text-lg transition shadow-lg">Guardar</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal para Editar un Cash (tasa, plataforma, moneda, saldo) -->
+    <div id="cash-edit-modal" class="fixed inset-0 bg-black bg-opacity-70 hidden flex justify-center items-end md:items-center z-[100] transition-opacity">
+        <div class="bg-gray-800 w-full md:w-96 md:rounded-lg rounded-t-2xl border border-gray-700 shadow-2xl p-6 max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold">Editar Cash</h2>
+                <button onclick="toggleModal('cash-edit-modal')" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+            </div>
+            <form onsubmit="saveCashEdit(event)">
+                <input type="hidden" id="cash-edit-id">
+                <div class="mb-4 flex gap-4">
+                    <div class="w-1/2">
+                        <label class="block text-sm text-gray-400 mb-1">Moneda</label>
+                        <select id="cash-edit-currency" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                            <option value="USDT">USDT</option>
+                            <option value="USDC">USDC</option>
+                        </select>
+                    </div>
+                    <div class="w-1/2">
+                        <label class="block text-sm text-gray-400 mb-1">Plataforma</label>
+                        <select id="cash-edit-platform" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                            <option value="Binance">Binance</option>
+                            <option value="Nexo">Nexo</option>
+                            <option value="Otra">Otra</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-sm text-gray-400 mb-1">Tasa de interés anual (%)</label>
+                    <input type="number" step="any" id="cash-edit-rate" required class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                    <p class="text-[11px] text-gray-500 mt-1">La tasa nueva corre desde hoy; el interés generado hasta ahora se conserva.</p>
+                </div>
+                <div class="mb-6">
+                    <label class="block text-sm text-gray-400 mb-1">Saldo actual (USD)</label>
+                    <input type="number" step="any" id="cash-edit-balance" required class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                    <p class="text-[11px] text-gray-500 mt-1">Cambialo sólo para corregir el saldo. Para sumar o sacar plata usá Depositar / Retirar.</p>
+                </div>
+                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 py-3 rounded-lg font-bold text-lg transition shadow-lg">Guardar Cambios</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal para Crear / Editar un Objetivo de Ahorro -->
+    <div id="goal-modal" class="fixed inset-0 bg-black bg-opacity-70 hidden flex justify-center items-end md:items-center z-[100] transition-opacity">
+        <div class="bg-gray-800 w-full md:w-96 md:rounded-lg rounded-t-2xl border border-gray-700 shadow-2xl p-6 max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold" id="goal-modal-title">Nuevo Objetivo</h2>
+                <button onclick="toggleModal('goal-modal')" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+            </div>
+            <form onsubmit="saveGoal(event)">
+                <input type="hidden" id="goal-edit-id">
+                <div class="mb-4">
+                    <label class="block text-sm text-gray-400 mb-1">Nombre (Ej: PS5)</label>
+                    <input type="text" id="goal-name" required maxlength="60" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                </div>
+                <div class="mb-6 flex gap-4">
+                    <div class="w-1/3">
+                        <label class="block text-sm text-gray-400 mb-1">Moneda</label>
+                        <select id="goal-currency" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                            <option value="USD">USD</option>
+                            <option value="ARS">ARS</option>
+                        </select>
+                    </div>
+                    <div class="w-2/3">
+                        <label class="block text-sm text-gray-400 mb-1">Monto objetivo</label>
+                        <input type="number" step="any" min="0" id="goal-target" required class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                    </div>
+                </div>
+                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 py-3 rounded-lg font-bold text-lg transition shadow-lg" id="goal-submit-btn">Crear Objetivo</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal para Aportar / Retirar de un Objetivo de Ahorro -->
+    <div id="goal-move-modal" class="fixed inset-0 bg-black bg-opacity-70 hidden flex justify-center items-end md:items-center z-[100] transition-opacity">
+        <div class="bg-gray-800 w-full md:w-96 md:rounded-lg rounded-t-2xl border border-gray-700 shadow-2xl p-6 max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold" id="goal-move-title">Aportar</h2>
+                <button onclick="toggleModal('goal-move-modal')" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+            </div>
+            <p class="text-xs text-gray-400 mb-4" id="goal-move-info"></p>
+            <form onsubmit="saveGoalMove(event)">
+                <input type="hidden" id="goal-move-id">
+                <div class="mb-4">
+                    <label class="block text-sm text-gray-400 mb-1">Tipo de movimiento</label>
+                    <select id="goal-move-type" onchange="updateGoalMoveForm()" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                        <option value="deposit">Aportar al objetivo</option>
+                        <option value="withdraw">Retirar del objetivo</option>
+                    </select>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-sm text-gray-400 mb-1" id="goal-move-amount-label">Monto</label>
+                    <input type="number" step="any" min="0" id="goal-move-amount" oninput="updateGoalMoveForm(true)" required class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                </div>
+                <div class="mb-6">
+                    <label class="block text-sm text-gray-400 mb-1" id="goal-move-source-label">Origen</label>
+                    <select id="goal-move-source" onchange="updateGoalMoveForm(true)" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                        <!-- Generado por JS -->
+                    </select>
+                    <p class="text-[11px] text-gray-500 mt-1" id="goal-move-hint"></p>
+                </div>
+                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 py-3 rounded-lg font-bold text-lg transition shadow-lg">Guardar</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal para Crear / Editar un Préstamo (deuda) -->
+    <div id="loan-modal" class="fixed inset-0 bg-black bg-opacity-70 hidden flex justify-center items-end md:items-center z-[100] transition-opacity">
+        <div class="bg-gray-800 w-full md:w-96 md:rounded-lg rounded-t-2xl border border-gray-700 shadow-2xl p-6 max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold" id="loan-modal-title">Nuevo Préstamo</h2>
+                <button onclick="toggleModal('loan-modal')" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+            </div>
+            <form onsubmit="saveLoan(event)">
+                <input type="hidden" id="loan-edit-id">
+                <div class="mb-4">
+                    <label class="block text-sm text-gray-400 mb-1">Descripción (Ej: Préstamo auto)</label>
+                    <input type="text" id="loan-name" required maxlength="60" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-sm text-gray-400 mb-1">A quién le debés (opcional)</label>
+                    <input type="text" id="loan-lender" maxlength="60" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                </div>
+                <div class="mb-4 flex gap-4">
+                    <div class="w-1/3">
+                        <label class="block text-sm text-gray-400 mb-1">Moneda</label>
+                        <select id="loan-currency" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                            <option value="USD">USD</option>
+                            <option value="ARS">ARS</option>
+                        </select>
+                    </div>
+                    <div class="w-2/3">
+                        <label class="block text-sm text-gray-400 mb-1">Monto del préstamo</label>
+                        <input type="number" step="any" min="0" id="loan-original" required class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                    </div>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-sm text-gray-400 mb-1">Saldo pendiente (opcional)</label>
+                    <input type="number" step="any" min="0" id="loan-balance" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                    <p class="text-[11px] text-gray-500 mt-1">Si lo dejás vacío, se toma el monto completo del préstamo. Incluí acá los intereses si corresponde.</p>
+                </div>
+                <div class="mb-6">
+                    <label class="block text-sm text-gray-400 mb-1">Vencimiento (opcional)</label>
+                    <input type="date" id="loan-due" onclick="this.showPicker?.()" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500 cursor-pointer">
+                </div>
+                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 py-3 rounded-lg font-bold text-lg transition shadow-lg" id="loan-submit-btn">Registrar Préstamo</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal para Registrar un Pago de un Préstamo -->
+    <div id="loan-pay-modal" class="fixed inset-0 bg-black bg-opacity-70 hidden flex justify-center items-end md:items-center z-[100] transition-opacity">
+        <div class="bg-gray-800 w-full md:w-96 md:rounded-lg rounded-t-2xl border border-gray-700 shadow-2xl p-6 max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold">Registrar Pago</h2>
+                <button onclick="toggleModal('loan-pay-modal')" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+            </div>
+            <p class="text-xs text-gray-400 mb-4" id="loan-pay-info"></p>
+            <form onsubmit="saveLoanPayment(event)">
+                <input type="hidden" id="loan-pay-id">
+                <div class="mb-4">
+                    <label class="block text-sm text-gray-400 mb-1" id="loan-pay-amount-label">Monto pagado</label>
+                    <input type="number" step="any" min="0" id="loan-pay-amount" oninput="updateLoanPayHint()" required class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                </div>
+                <div class="mb-6">
+                    <label class="block text-sm text-gray-400 mb-1">Pagado con</label>
+                    <select id="loan-pay-source" onchange="updateLoanPayHint()" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                        <!-- Generado por JS -->
+                    </select>
+                    <p class="text-[11px] text-gray-500 mt-1" id="loan-pay-hint"></p>
+                </div>
+                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 py-3 rounded-lg font-bold text-lg transition shadow-lg">Registrar Pago</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal de Detalles (Historial, Ventas y Edición) -->
+    <div id="details-modal" class="fixed inset-0 bg-black bg-opacity-70 hidden flex justify-center items-center z-[100] p-4">
+        <div class="bg-gray-800 w-full max-w-2xl rounded-xl border border-gray-700 shadow-2xl p-6 max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-6 border-b border-gray-700 pb-4">
+                <div>
+                    <h2 class="text-2xl font-bold text-blue-400" id="detail-ticker">TICKER</h2>
+                    <p class="text-sm text-gray-400">Posición Actual: <span id="detail-shares" class="font-bold text-white">0</span> unidades</p>
+                    <p class="text-sm text-gray-400">Precio Promedio: <span id="detail-avg-price" class="font-bold text-white">$0.00</span></p>
+                </div>
+                <button onclick="toggleModal('details-modal')" class="text-gray-400 hover:text-white text-3xl">&times;</button>
+            </div>
+
+            <!-- Formulario de Venta -->
+            <div class="bg-gray-900 p-4 rounded-lg mb-6 border border-gray-700">
+                <h3 class="font-bold mb-3 text-red-400"><i class="fas fa-hand-holding-usd mr-2"></i>Registrar Venta / Reducción</h3>
+                <form id="sell-form" onsubmit="registerSale(event)" class="flex gap-4 items-end">
+                    <div class="w-1/3">
+                        <label class="block text-xs text-gray-400 mb-1">Cant. a Vender</label>
+                        <input type="number" step="any" id="sell-shares" required class="w-full bg-gray-800 text-white px-3 py-2 rounded border border-gray-600 focus:outline-none focus:border-red-500">
+                    </div>
+                    <div class="w-1/3">
+                        <label class="block text-xs text-gray-400 mb-1">Precio de Venta ($)</label>
+                        <input type="number" step="any" id="sell-price" required class="w-full bg-gray-800 text-white px-3 py-2 rounded border border-gray-600 focus:outline-none focus:border-red-500">
+                    </div>
+                    <div class="w-1/3">
+                        <button type="submit" class="w-full bg-red-600 hover:bg-red-700 py-2 rounded font-bold transition">Vender</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Historial de Transacciones con opción a Editar -->
+            <h3 class="font-bold mb-3"><i class="fas fa-history mr-2"></i>Historial de Asientos</h3>
+            <div class="overflow-x-auto bg-gray-900 rounded-lg border border-gray-700">
+                <table class="w-full text-left text-sm">
+                    <thead class="bg-gray-800 text-gray-400">
+                        <tr>
+                            <th class="p-3">Fecha</th>
+                            <th class="p-3">Tipo</th>
+                            <th class="p-3 text-right">Cant.</th>
+                            <th class="p-3 text-right">Precio</th>
+                            <th class="p-3 text-right">Total</th>
+                            <th class="p-3 text-center">Editar</th>
+                        </tr>
+                    </thead>
+                    <tbody id="history-table" class="divide-y divide-gray-700">
+                        <!-- Generado por JS -->
+                    </tbody>
+                </table>
+            </div>
+            
+            <div class="mt-6 flex justify-end">
+                <button onclick="deleteAsset()" class="text-red-500 hover:text-red-400 font-semibold text-sm"><i class="fas fa-trash-alt mr-1"></i> Borrar Activo Completo</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal para Editar una Operación pasadas -->
+    <div id="edit-entry-modal" class="fixed inset-0 bg-black bg-opacity-70 hidden flex justify-center items-center z-[110] p-4">
+        <div class="bg-gray-800 w-full max-w-md rounded-xl border border-gray-700 p-6">
+            <h3 class="text-lg font-bold mb-4 text-blue-400"><i class="fas fa-edit mr-2"></i>Editar Asiento del Historial</h3>
+            <form onsubmit="saveEntryEdit(event)">
+                <input type="hidden" id="edit-entry-index">
+                <div class="mb-4">
+                    <label class="block text-xs text-gray-400 mb-1">Cantidad</label>
+                    <input type="number" step="any" id="edit-entry-shares" required class="w-full bg-gray-900 text-white p-2 rounded border border-gray-600">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-xs text-gray-400 mb-1">Precio Unitario ($)</label>
+                    <input type="number" step="any" id="edit-entry-price" required class="w-full bg-gray-900 text-white p-2 rounded border border-gray-600">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-xs text-gray-400 mb-1">Fecha</label>
+                    <input type="datetime-local" id="edit-entry-date" onclick="this.showPicker?.()" required class="w-full bg-gray-900 text-white p-2 rounded border border-gray-600 cursor-pointer">
+                </div>
+                <div class="flex justify-end gap-2">
+                    <button type="button" onclick="toggleModal('edit-entry-modal')" class="px-4 py-2 bg-gray-700 rounded">Cancelar</button>
+                    <button type="submit" class="px-4 py-2 bg-blue-600 rounded font-bold">Guardar Cambios</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal de Detalle del Patrimonio (se abre al tocar la tarjeta de Patrimonio Total) -->
+    <div id="patrimonio-modal" class="fixed inset-0 bg-black bg-opacity-70 hidden flex justify-center items-center z-[100] p-4">
+        <div class="bg-gray-800 w-full max-w-sm rounded-xl border border-gray-700 shadow-2xl p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-bold">Detalle del Patrimonio</h2>
+                <button onclick="toggleModal('patrimonio-modal')" class="text-gray-400 hover:text-white text-2xl leading-none">&times;</button>
+            </div>
+            <div class="space-y-3 text-sm">
+                <div class="flex justify-between">
+                    <span class="text-gray-400">Valor Total (USD)</span>
+                    <span class="font-semibold" id="modal-total-usd">$0.00</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-400">Valor Total (ARS)</span>
+                    <span class="font-semibold" id="modal-total-ars">—</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-400">Total Invertido</span>
+                    <span class="font-semibold" id="modal-total-invested">$0.00</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-400">P/L No Realizado</span>
+                    <span class="font-bold" id="modal-total-pl">$0.00 (0.00%)</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-400">Inversiones Activas</span>
+                    <span class="font-semibold" id="modal-asset-count">0</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-400">Cash (USDT/USDC)</span>
+                    <span class="font-semibold" id="modal-cash-total">$0.00</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-400">Ahorro (objetivos)</span>
+                    <span class="font-semibold" id="modal-savings-total">$0.00</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-400">Préstamos (deuda)</span>
+                    <span class="font-semibold text-red-400" id="modal-debt-total">$0.00</span>
+                </div>
+                <div class="flex justify-between border-t border-gray-700 pt-3">
+                    <span class="text-gray-400">Dólar CCL usado</span>
+                    <span class="font-semibold" id="modal-ccl-rate">—</span>
+                </div>
+                <p class="text-[11px] text-gray-500" id="modal-ccl-updated"></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const firebaseConfig = {
+            apiKey: "AIzaSyCJFq2vaub_yaUtLYQ3ePyiOfi2ps42W8o",
+            authDomain: "portafolio-traker.firebaseapp.com",
+            projectId: "portafolio-traker",
+            storageBucket: "portafolio-traker.firebasestorage.app",
+            messagingSenderId: "507332330196",
+            appId: "1:507332330196:web:831136560084f6867af141",
+            measurementId: "G-P4C61738SP"
+        };
+
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
+        Chart.register(ChartDataLabels);
+
+        let portfolio = [];
+        let myChart = null;
+        let currentSort = { column: 'pl', asc: false };
+        let activeAssetIndex = null;
+
+        // --- Patrimonio en ARS (dólar CCL) y evolución histórica ---
+        let cclRate = null;          // cotización CCL (venta), pesos por dólar
+        let cclUpdatedAt = null;     // hora de la última cotización obtenida
+        let evolutionHistory = [];   // [{date:'YYYY-MM-DD', totalValue, totalInvested}, ...] ascendente
+        let evolutionMode = 'total'; // 'total' (patrimonio) | 'ganancias'
+        let evolutionRange = 'MAX';  // '1M' | '6M' | '1A' | 'YTD' | 'MAX' | 'CUSTOM'
+        let evolutionCustomStart = null;
+        let evolutionCustomEnd = null;
+        let myEvolutionChart = null;
+
+        // --- Navegación por páginas ---
+        let currentPage = 'dashboard';
+
+        // --- Cash (USDT/USDC) y Cripto DCA ---
+        let cashHoldings = [];  // [{id, amount, currency, platform, annualRate, lastUpdated}]
+        let dcaPlans = [];      // [{id, ticker, monthlyAmount, cashHoldingId, active, lastExecuted, totalInvested, createdAt}]
+        let txMode = 'usd';     // modo activo del modal "+Transacción": 'usd' | 'cedear' | 'cash'
+
+        // --- Ahorro (objetivos) y Préstamos (deudas) ---
+        let savingsGoals = [];  // [{id, name, currency:'USD'|'ARS', target, saved, createdAt, movements}]
+        let loans = [];         // [{id, name, lender, currency:'USD'|'ARS', original, balance, dueDate, createdAt, payments}]
+        let goalsLoadError = false;
+        let loansLoadError = false;
+
+        // Paleta de colores + función determinista ticker -> color.
+        // A diferencia de un mapa "por orden de aparición", esto se calcula a partir
+        // del propio texto del ticker (hash), así que da siempre el mismo resultado
+        // sin importar en qué orden se cargó, ordenó o mostró cada activo.
+        const colorPalette = [
+            '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6',
+            '#EC4899', '#14B8A6', '#F97316', '#6366F1', '#84CC16',
+            '#06B6D4', '#D946EF', '#EAB308', '#F43F5E', '#22C55E',
+            '#0EA5E9', '#A855F7', '#FB923C', '#2DD4BF', '#E879F9'
+        ];
+
+        function getTickerColor(ticker) {
+            const str = String(ticker || '').toUpperCase();
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                // Hash simple y determinista (mismo string -> mismo número siempre)
+                hash = (hash * 31 + str.charCodeAt(i)) | 0;
+            }
+            const index = Math.abs(hash) % colorPalette.length;
+            return colorPalette[index];
+        }
+
+        function toggleModal(id) {
+            document.getElementById(id).classList.toggle('hidden');
+        }
+
+        // Cambia entre las 3 páginas (Panel General / Inversiones / Cripto DCA).
+        // No hay routing real: simplemente se muestra/oculta cada sección.
+        function showPage(pageId) {
+            currentPage = pageId;
+            ['dashboard', 'inversiones', 'dca', 'ahorro', 'deudas'].forEach(id => {
+                document.getElementById(`page-${id}`).classList.toggle('hidden', id !== pageId);
+                const navBtn = document.getElementById(`nav-${id}`);
+                navBtn.className = `nav-link flex items-center gap-2 px-3 py-2 rounded-lg whitespace-nowrap text-sm font-semibold transition ${
+                    id === pageId ? 'bg-green-600/20 text-green-400 border border-green-600/40' : 'text-gray-300 hover:bg-gray-700 border border-transparent'
+                }`;
+            });
+            // Estas secciones se renderizan "perezosamente" al entrar, ya que dependen
+            // de datos (cash / planes DCA) que pueden haberse actualizado mientras
+            // el usuario estaba en otra página.
+            if (pageId === 'inversiones') renderCashList();
+            if (pageId === 'dca') renderDcaList();
+            if (pageId === 'ahorro') renderGoalsList();
+            if (pageId === 'deudas') renderLoansList();
+        }
+
+        // Escapa texto libre cargado por el usuario (nombres de objetivos/préstamos)
+        // antes de meterlo en innerHTML.
+        function escapeHtml(text) {
+            return String(text == null ? '' : text).replace(/[&<>"']/g, c => (
+                { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+            ));
+        }
+
+        // Convierte un monto a USD. Los montos en pesos usan el CCL del momento; si
+        // no hay cotización disponible devuelve 0 (no se puede valuar).
+        function toUSD(amount, currency) {
+            const value = Number(amount) || 0;
+            if (currency === 'ARS') return cclRate ? value / cclRate : 0;
+            return value;
+        }
+
+        function formatByCurrency(amount, currency) {
+            return currency === 'ARS' ? formatARS(amount) : formatMoney(amount);
+        }
+
+        // <option>s con cada Cash y su saldo a hoy (lo usan DCA, Ahorro y Préstamos)
+        function buildCashOptions(selectedId) {
+            const todayKey = new Date().toISOString().slice(0, 10);
+            return cashHoldings.map(h =>
+                `<option value="${h.id}" ${h.id === selectedId ? 'selected' : ''}>${h.currency} · ${h.platform} (${formatMoney(getCurrentCashBalance(h, todayKey))})</option>`
+            ).join('');
+        }
+
+        function formatMoney(amount) {
+            return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+        }
+
+        // Formatea un monto en pesos argentinos con separador de miles con punto (ej: "ARS 2.585.420")
+        function formatARS(amount) {
+            const formatted = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 0 }).format(Math.round(amount));
+            return `ARS ${formatted}`;
+        }
+
+        // Convierte un ISO string (UTC) al formato que espera <input type="datetime-local"> (hora local)
+        function isoToDatetimeLocal(isoString) {
+            const d = new Date(isoString);
+            if (isNaN(d.getTime())) return '';
+            const offsetMs = d.getTimezoneOffset() * 60000;
+            return new Date(d.getTime() - offsetMs).toISOString().slice(0, 16);
+        }
+
+        // Convierte el valor de un <input type="datetime-local"> (hora local) a ISO string (UTC)
+        function datetimeLocalToIso(value) {
+            const d = new Date(value);
+            return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+        }
+
+        // Cotización del dólar "Contado con Liqui" (CCL), vía la API pública y gratuita
+        // de dolarapi.com (no requiere key). Si falla, la app sigue funcionando
+        // normalmente y simplemente no muestra el equivalente en pesos.
+        async function fetchCCLRate() {
+            try {
+                const res = await fetch('https://dolarapi.com/v1/dolares/contadoconliqui');
+                const data = await res.json();
+                if (data && data.venta) {
+                    cclRate = Number(data.venta);
+                    cclUpdatedAt = data.fechaActualizacion || new Date().toISOString();
+                }
+            } catch (error) {
+                console.error('No se pudo obtener la cotización del dólar CCL:', error);
+                cclRate = null;
+            }
+        }
+
+        // Trae el historial de patrimonio guardado en Firestore (colección nueva
+        // "historialPatrimonio"), con un documento por día (id = fecha "YYYY-MM-DD").
+        async function fetchEvolutionHistory() {
+            try {
+                const snapshot = await db.collection('historialPatrimonio').orderBy('date', 'asc').limit(1000).get();
+                evolutionHistory = [];
+                snapshot.forEach(doc => {
+                    const d = doc.data();
+                    evolutionHistory.push({
+                        date: d.date,
+                        totalValue: Number(d.totalValue) || 0,
+                        totalInvested: Number(d.totalInvested) || 0
+                    });
+                });
+            } catch (error) {
+                console.error('No se pudo obtener el historial de patrimonio:', error);
+                evolutionHistory = [];
+            }
+        }
+
+        // Diferencia en días (enteros) entre dos fechas "YYYY-MM-DD"
+        function daysBetweenDates(dateKeyA, dateKeyB) {
+            const a = new Date(dateKeyA + 'T00:00:00Z');
+            const b = new Date(dateKeyB + 'T00:00:00Z');
+            return Math.round((b - a) / 86400000);
+        }
+
+        // Trae los saldos de Cash (USDT/USDC) guardados en Firestore (colección nueva "cashHoldings")
+        async function fetchCashHoldings() {
+            try {
+                const snapshot = await db.collection('cashHoldings').get();
+                cashHoldings = [];
+                snapshot.forEach(doc => {
+                    const d = doc.data();
+                    cashHoldings.push({
+                        id: doc.id,
+                        amount: Number(d.amount) || 0,
+                        currency: d.currency || 'USDT',
+                        platform: d.platform || 'Otra',
+                        // Capital aportado (sin intereses). Los Cash viejos no lo tienen:
+                        // en ese caso se toma `amount`, igual que antes.
+                        principal: d.principal != null ? (Number(d.principal) || 0) : (Number(d.amount) || 0),
+                        annualRate: Number(d.annualRate) || 0,
+                        lastUpdated: d.lastUpdated || new Date().toISOString().slice(0, 10)
+                    });
+                });
+            } catch (error) {
+                console.error('No se pudo obtener el Cash:', error);
+                cashHoldings = [];
+            }
+        }
+
+        // Balance estimado de un Cash a la fecha "todayKey", con interés compuesto
+        // diario desde su último movimiento (holding.lastUpdated). Cada vez que hay
+        // un depósito o un retiro (ej: un débito de DCA), lastUpdated se actualiza y
+        // el interés acumulado hasta ese momento pasa a formar parte de `amount`
+        // (se "asienta"), así el cálculo siempre es exacto sin guardar un historial día a día.
+        function getCurrentCashBalance(holding, todayKey) {
+            const days = Math.max(daysBetweenDates(holding.lastUpdated, todayKey), 0);
+            const dailyRate = (Number(holding.annualRate) || 0) / 100 / 365;
+            return (Number(holding.amount) || 0) * Math.pow(1 + dailyRate, days);
+        }
+
+        // Valor total del Cash (con interés a hoy) y la suma de los montos originales
+        // (principal), que se usa para que la "ganancia" del patrimonio no confunda
+        // depósitos de cash con ganancia real (sólo el interés generado cuenta como ganancia).
+        function getCashTotals() {
+            const todayKey = new Date().toISOString().slice(0, 10);
+            let cashValue = 0;
+            let cashPrincipal = 0;
+            cashHoldings.forEach(h => {
+                cashValue += getCurrentCashBalance(h, todayKey);
+                cashPrincipal += Number(h.principal) || 0;
+            });
+            return { cashValue, cashPrincipal };
+        }
+
+        function saveCashHoldingCore(amount, currency, platform, rate, dateKey) {
+            return db.collection('cashHoldings').add({
+                amount: amount,
+                principal: amount,
+                currency: currency,
+                platform: platform,
+                annualRate: rate,
+                lastUpdated: dateKey
+            });
+        }
+
+        async function addCashHolding(e) {
+            e.preventDefault();
+            const amount = parseFloat(document.getElementById('new-cash-amount').value);
+            const currency = document.getElementById('new-cash-currency').value;
+            const platform = document.getElementById('new-cash-platform').value;
+            const rate = parseFloat(document.getElementById('new-cash-rate').value) || 0;
+
+            if (!(amount > 0)) {
+                alert('Ingresá un monto de Cash válido.');
+                return;
+            }
+
+            const todayKey = new Date().toISOString().slice(0, 10);
+            await saveCashHoldingCore(amount, currency, platform, rate, todayKey);
+
+            toggleModal('cash-modal');
+            e.target.reset();
+            fetchPortfolio();
+        }
+
+        async function deleteCashHolding(id) {
+            if (!confirm('¿Eliminar este Cash? Esta acción no se puede deshacer.')) return;
+            await db.collection('cashHoldings').doc(id).delete();
+            fetchPortfolio();
+        }
+
+        // Suma (delta > 0) o resta (delta < 0) plata de un Cash puntual, "asentando"
+        // primero el interés acumulado hasta hoy. `principal` lleva la cuenta del
+        // capital aportado (sin intereses), para que el modo "Ganancias" siga
+        // contando el interés como ganancia aunque haya movimientos en el medio.
+        async function applyCashMovement(holdingId, delta, todayKey) {
+            const holding = cashHoldings.find(h => h.id === holdingId);
+            if (!holding) return false;
+
+            const settledBalance = getCurrentCashBalance(holding, todayKey);
+            const newAmount = settledBalance + delta;
+            const newPrincipal = newAmount < 0
+                ? newAmount
+                : Math.min(Math.max((Number(holding.principal) || 0) + delta, 0), newAmount);
+
+            await db.collection('cashHoldings').doc(holdingId).update({
+                amount: newAmount,
+                principal: newPrincipal,
+                lastUpdated: todayKey
+            });
+            holding.amount = newAmount;
+            holding.principal = newPrincipal;
+            holding.lastUpdated = todayKey;
+            return true;
+        }
+
+        // Descuenta `amount` de un Cash. Lo usa el motor de Cripto DCA para debitar cada compra.
+        function debitCash(holdingId, amount, todayKey) {
+            return applyCashMovement(holdingId, -amount, todayKey);
+        }
+
+        function openCashMoveModal(id, type) {
+            const holding = cashHoldings.find(h => h.id === id);
+            if (!holding) return;
+            const todayKey = new Date().toISOString().slice(0, 10);
+            document.getElementById('cash-move-id').value = id;
+            document.getElementById('cash-move-type').value = type;
+            document.getElementById('cash-move-amount').value = '';
+            document.getElementById('cash-move-info').textContent =
+                `${holding.currency} · ${holding.platform} — saldo actual ${formatMoney(getCurrentCashBalance(holding, todayKey))}`;
+            toggleModal('cash-move-modal');
+        }
+
+        async function saveCashMove(e) {
+            e.preventDefault();
+            const id = document.getElementById('cash-move-id').value;
+            const type = document.getElementById('cash-move-type').value;
+            const amount = parseFloat(document.getElementById('cash-move-amount').value);
+            const holding = cashHoldings.find(h => h.id === id);
+            if (!holding) return;
+            if (!(amount > 0)) {
+                alert('Ingresá un monto válido.');
+                return;
+            }
+
+            const todayKey = new Date().toISOString().slice(0, 10);
+            if (type === 'withdraw' && amount > getCurrentCashBalance(holding, todayKey) + 0.005) {
+                alert('No podés retirar más de lo que hay en este Cash.');
+                return;
+            }
+
+            await applyCashMovement(id, type === 'withdraw' ? -amount : amount, todayKey);
+            toggleModal('cash-move-modal');
+            fetchPortfolio();
+        }
+
+        function openCashEditModal(id) {
+            const holding = cashHoldings.find(h => h.id === id);
+            if (!holding) return;
+            const todayKey = new Date().toISOString().slice(0, 10);
+            const balanceInput = document.getElementById('cash-edit-balance');
+            const platformSelect = document.getElementById('cash-edit-platform');
+            // Si la plataforma guardada no está en la lista, la agregamos para no perderla
+            if (![...platformSelect.options].some(o => o.value === holding.platform)) {
+                platformSelect.add(new Option(holding.platform, holding.platform));
+            }
+            document.getElementById('cash-edit-id').value = id;
+            document.getElementById('cash-edit-currency').value = holding.currency;
+            platformSelect.value = holding.platform;
+            document.getElementById('cash-edit-rate').value = holding.annualRate;
+            balanceInput.value = getCurrentCashBalance(holding, todayKey).toFixed(2);
+            balanceInput.dataset.original = balanceInput.value;
+            toggleModal('cash-edit-modal');
+        }
+
+        async function saveCashEdit(e) {
+            e.preventDefault();
+            const id = document.getElementById('cash-edit-id').value;
+            const holding = cashHoldings.find(h => h.id === id);
+            if (!holding) return;
+
+            const rate = parseFloat(document.getElementById('cash-edit-rate').value);
+            const balanceInput = document.getElementById('cash-edit-balance');
+            const typedBalance = parseFloat(balanceInput.value);
+            if (isNaN(rate) || rate < 0 || isNaN(typedBalance) || typedBalance < 0) {
+                alert('Revisá la tasa y el saldo.');
+                return;
+            }
+
+            // Asentamos el interés generado hasta hoy con la tasa vieja; desde hoy corre la nueva.
+            const todayKey = new Date().toISOString().slice(0, 10);
+            const settledBalance = getCurrentCashBalance(holding, todayKey);
+            const balanceChanged = balanceInput.value !== balanceInput.dataset.original;
+            const newAmount = balanceChanged ? typedBalance : settledBalance;
+            // Una corrección manual del saldo se trata como capital (no como ganancia/pérdida)
+            const newPrincipal = Math.min(
+                Math.max((Number(holding.principal) || 0) + (newAmount - settledBalance), 0),
+                newAmount
+            );
+
+            await db.collection('cashHoldings').doc(id).update({
+                amount: newAmount,
+                principal: newPrincipal,
+                annualRate: rate,
+                currency: document.getElementById('cash-edit-currency').value,
+                platform: document.getElementById('cash-edit-platform').value,
+                lastUpdated: todayKey
+            });
+
+            toggleModal('cash-edit-modal');
+            fetchPortfolio();
+        }
+
+        function renderCashList() {
+            const container = document.getElementById('cash-list');
+            if (!container) return;
+            const emptyMsg = document.getElementById('cash-empty-msg');
+            const todayKey = new Date().toISOString().slice(0, 10);
+
+            container.innerHTML = '';
+            emptyMsg.textContent = cashHoldings.length === 0
+                ? 'Todavía no cargaste ningún Cash. Usá "+ Agregar Cash" o el modo "Cash" en "+Transacción".'
+                : '';
+
+            let total = 0;
+            cashHoldings.forEach(holding => {
+                const balance = getCurrentCashBalance(holding, todayKey);
+                const earned = balance - (Number(holding.principal) || 0);
+                total += balance;
+
+                container.innerHTML += `
+                    <div class="bg-gray-900 border border-gray-700 rounded-lg p-4">
+                        <div class="flex justify-between items-start mb-2">
+                            <div>
+                                <span class="font-bold text-blue-400">${holding.currency}</span>
+                                <span class="text-xs text-gray-500 block">${holding.platform}</span>
+                            </div>
+                            <div class="flex gap-3">
+                                <button onclick="openCashEditModal('${holding.id}')" class="text-gray-400 hover:text-white text-sm" title="Editar tasa, plataforma o saldo">
+                                    <i class="fas fa-pencil-alt"></i>
+                                </button>
+                                <button onclick="deleteCashHolding('${holding.id}')" class="text-gray-500 hover:text-red-400 text-sm" title="Eliminar">
+                                    <i class="fas fa-trash-alt"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <p class="text-xl font-bold text-white">${formatMoney(balance)}</p>
+                        <p class="text-xs text-gray-500 mt-1">Tasa: ${holding.annualRate}% anual${earned > 0.005 ? ` · +${formatMoney(earned)} generados` : ''}</p>
+                        <div class="flex gap-2 mt-3">
+                            <button onclick="openCashMoveModal('${holding.id}', 'deposit')" class="flex-1 bg-gray-700 hover:bg-gray-600 text-xs font-semibold py-1.5 rounded transition">
+                                <i class="fas fa-arrow-down mr-1 text-green-400"></i> Depositar
+                            </button>
+                            <button onclick="openCashMoveModal('${holding.id}', 'withdraw')" class="flex-1 bg-gray-700 hover:bg-gray-600 text-xs font-semibold py-1.5 rounded transition">
+                                <i class="fas fa-arrow-up mr-1 text-red-400"></i> Retirar
+                            </button>
+                        </div>
+                    </div>
+                `;
+            });
+
+            document.getElementById('cash-total-summary').textContent = `Total: ${formatMoney(total)}`;
+        }
+
+        // Guarda (o actualiza) el registro de patrimonio del día de hoy. El id del
+        // documento es la fecha, así que entrar varias veces el mismo día sólo
+        // actualiza ese único registro en vez de generar uno nuevo cada vez
+        // (mantiene la colección chica: como máximo 1 doc por día).
+        async function recordDailySnapshot(totalValue, totalInvested) {
+            const todayKey = new Date().toISOString().slice(0, 10);
+            try {
+                await db.collection('historialPatrimonio').doc(todayKey).set({
+                    date: todayKey,
+                    totalValue: totalValue,
+                    totalInvested: totalInvested,
+                    timestamp: new Date().toISOString()
+                });
+
+                const idx = evolutionHistory.findIndex(e => e.date === todayKey);
+                const entry = { date: todayKey, totalValue, totalInvested };
+                if (idx >= 0) evolutionHistory[idx] = entry;
+                else evolutionHistory.push(entry);
+            } catch (error) {
+                console.error('No se pudo guardar el registro diario de patrimonio:', error);
+            }
+        }
+
+        // Trae los planes de Cripto DCA guardados en Firestore (colección nueva "dcaPlans")
+        async function fetchDcaPlans() {
+            try {
+                const snapshot = await db.collection('dcaPlans').get();
+                dcaPlans = [];
+                snapshot.forEach(doc => {
+                    const d = doc.data();
+                    dcaPlans.push({
+                        id: doc.id,
+                        ticker: d.ticker,
+                        monthlyAmount: Number(d.monthlyAmount) || 0,
+                        cashHoldingId: d.cashHoldingId,
+                        active: d.active !== false,
+                        lastExecuted: d.lastExecuted || null,
+                        totalInvested: Number(d.totalInvested) || 0,
+                        createdAt: d.createdAt || new Date().toISOString().slice(0, 10)
+                    });
+                });
+            } catch (error) {
+                console.error('No se pudo obtener los planes de Cripto DCA:', error);
+                dcaPlans = [];
+            }
+        }
+
+        // Abre el modal de plan DCA. Sin `planId` crea uno nuevo; con `planId` edita
+        // el aporte mensual y/o el Cash de origen de un plan existente (la cripto no
+        // se cambia: para eso se crea otro plan).
+        function openDcaModal(planId = null) {
+            const plan = planId ? dcaPlans.find(p => p.id === planId) : null;
+            const select = document.getElementById('new-dca-cash');
+            select.innerHTML = cashHoldings.length === 0
+                ? '<option value="">No hay ningún Cash cargado todavía</option>'
+                : buildCashOptions(plan ? plan.cashHoldingId : null);
+
+            const tickerInput = document.getElementById('new-dca-ticker');
+            document.getElementById('dca-edit-id').value = plan ? plan.id : '';
+            tickerInput.value = plan ? plan.ticker : '';
+            tickerInput.disabled = !!plan;
+            document.getElementById('new-dca-monto').value = plan ? plan.monthlyAmount : '';
+            document.getElementById('dca-modal-title').textContent = plan ? 'Editar Plan DCA' : 'Nuevo Plan DCA';
+            document.getElementById('dca-submit-btn').textContent = plan ? 'Guardar Cambios' : 'Crear Plan';
+            toggleModal('dca-modal');
+        }
+
+        async function saveDcaPlan(e) {
+            e.preventDefault();
+            const editId = document.getElementById('dca-edit-id').value;
+            const ticker = document.getElementById('new-dca-ticker').value.trim().toLowerCase();
+            const monthlyAmount = parseFloat(document.getElementById('new-dca-monto').value);
+            const cashHoldingId = document.getElementById('new-dca-cash').value;
+
+            if (!ticker || !(monthlyAmount > 0) || !cashHoldingId) {
+                alert('Completá la cripto, el monto mensual y el Cash de origen.');
+                return;
+            }
+
+            if (editId) {
+                // El aporte nuevo rige desde la próxima compra; lo ya acreditado no cambia.
+                await db.collection('dcaPlans').doc(editId).update({ monthlyAmount, cashHoldingId });
+            } else {
+                const todayKey = new Date().toISOString().slice(0, 10);
+                await db.collection('dcaPlans').add({
+                    ticker,
+                    monthlyAmount,
+                    cashHoldingId,
+                    active: true,
+                    lastExecuted: null,
+                    totalInvested: 0,
+                    createdAt: todayKey
+                });
+            }
+
+            toggleModal('dca-modal');
+            e.target.reset();
+            fetchPortfolio();
+        }
+
+        async function toggleDcaPlan(id) {
+            const plan = dcaPlans.find(p => p.id === id);
+            if (!plan) return;
+            const newActive = !plan.active;
+            await db.collection('dcaPlans').doc(id).update({ active: newActive });
+            plan.active = newActive;
+            renderDcaList();
+        }
+
+        async function deleteDcaPlan(id) {
+            if (!confirm('¿Eliminar este plan DCA? Las compras que ya hizo NO se van a borrar.')) return;
+            await db.collection('dcaPlans').doc(id).delete();
+            fetchPortfolio();
+        }
+
+        function renderDcaList() {
+            const container = document.getElementById('dca-list');
+            if (!container) return;
+            const emptyMsg = document.getElementById('dca-empty-msg');
+
+            container.innerHTML = '';
+            emptyMsg.textContent = dcaPlans.length === 0
+                ? 'Todavía no creaste ningún plan DCA.'
+                : '';
+
+            dcaPlans.forEach(plan => {
+                const cashSource = cashHoldings.find(h => h.id === plan.cashHoldingId);
+                const dailyAmount = plan.monthlyAmount / 30;
+                container.innerHTML += `
+                    <div class="bg-gray-900 border border-gray-700 rounded-lg p-4">
+                        <div class="flex justify-between items-start mb-2">
+                            <div>
+                                <span class="font-bold text-blue-400 uppercase">${plan.ticker}</span>
+                                <span class="text-xs ${plan.active ? 'text-green-400' : 'text-gray-500'} block">${plan.active ? 'Activo' : 'Pausado'}</span>
+                            </div>
+                            <div class="flex gap-3">
+                                <button onclick="openDcaModal('${plan.id}')" class="text-gray-400 hover:text-white text-sm" title="Editar aporte o Cash de origen">
+                                    <i class="fas fa-pencil-alt"></i>
+                                </button>
+                                <button onclick="toggleDcaPlan('${plan.id}')" class="text-gray-400 hover:text-white text-sm" title="${plan.active ? 'Pausar' : 'Reanudar'}">
+                                    <i class="fas ${plan.active ? 'fa-pause' : 'fa-play'}"></i>
+                                </button>
+                                <button onclick="deleteDcaPlan('${plan.id}')" class="text-gray-500 hover:text-red-400 text-sm">
+                                    <i class="fas fa-trash-alt"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <p class="text-sm text-gray-300">${formatMoney(plan.monthlyAmount)} / mes <span class="text-gray-500">(≈ ${formatMoney(dailyAmount)}/día)</span></p>
+                        <p class="text-xs text-gray-500 mt-1">Origen: ${cashSource ? `${cashSource.currency} · ${cashSource.platform}` : 'Cash eliminado'}</p>
+                        <p class="text-xs text-gray-500 mt-1">Acreditado hasta ahora: ${formatMoney(plan.totalInvested)}</p>
+                    </div>
+                `;
+            });
+        }
+
+        // Pone al día los planes DCA activos: si pasaron días desde la última
+        // ejecución (o desde su creación, la primera vez), acredita ese monto
+        // acumulado de una sola vez a la cripto en "Inversiones" y lo descuenta
+        // del Cash de origen. Es seguro llamarla en cada carga: si ya ejecutó
+        // hoy, no hace nada (no duplica compras).
+        // Simplificación consciente: si se saltearon varios días, el catch-up usa
+        // el precio ACTUAL para todo el monto acumulado (no busca el precio
+        // histórico de cada día salteado, para no multiplicar llamadas a la API).
+        async function runDueDcaExecutions() {
+            const todayKey = new Date().toISOString().slice(0, 10);
+
+            for (const plan of dcaPlans) {
+                if (!plan.active) continue;
+                if (plan.lastExecuted === todayKey) continue; // ya ejecutó hoy
+
+                const daysToCharge = plan.lastExecuted
+                    ? daysBetweenDates(plan.lastExecuted, todayKey)
+                    : daysBetweenDates(plan.createdAt, todayKey) + 1; // 1ra vez: incluye el día de creación
+
+                if (daysToCharge <= 0) continue;
+
+                const dailyAmount = plan.monthlyAmount / 30;
+                const totalAmount = dailyAmount * daysToCharge;
+
+                let currentPrice = null;
+                try {
+                    const res = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${plan.ticker}&vs_currencies=usd`);
+                    const data = await res.json();
+                    if (data[plan.ticker]) currentPrice = data[plan.ticker].usd;
+                } catch (error) {
+                    console.error(`No se pudo obtener el precio de ${plan.ticker} para el DCA:`, error);
+                }
+                if (!currentPrice || !(currentPrice > 0)) continue; // reintenta en la próxima carga
+
+                const quantity = totalAmount / currentPrice;
+                const debited = await debitCash(plan.cashHoldingId, totalAmount, todayKey);
+                if (!debited) continue; // el Cash de origen ya no existe
+
+                await recordBuy(plan.ticker, 'crypto', quantity, currentPrice, new Date().toISOString(), { dca: true });
+
+                const newTotalInvested = (plan.totalInvested || 0) + totalAmount;
+                await db.collection('dcaPlans').doc(plan.id).update({
+                    lastExecuted: todayKey,
+                    totalInvested: newTotalInvested
+                });
+                plan.lastExecuted = todayKey;
+                plan.totalInvested = newTotalInvested;
+            }
+        }
+
+        // =====================================================================
+        // AHORRO: objetivos (ej: "PS5") que se van llenando con aportes desde un
+        // Cash (la plata se mueve: se descuenta de ese Cash) o con plata externa.
+        // Colección "objetivosAhorro". Lo ahorrado cuenta en el Patrimonio Total.
+        // =====================================================================
+        async function fetchSavingsGoals() {
+            try {
+                const snapshot = await db.collection('objetivosAhorro').get();
+                savingsGoals = [];
+                snapshot.forEach(doc => {
+                    const d = doc.data();
+                    savingsGoals.push({
+                        id: doc.id,
+                        name: d.name || 'Objetivo',
+                        currency: d.currency === 'ARS' ? 'ARS' : 'USD',
+                        target: Number(d.target) || 0,
+                        saved: Number(d.saved) || 0,
+                        createdAt: d.createdAt || new Date().toISOString().slice(0, 10),
+                        movements: Array.isArray(d.movements) ? d.movements : []
+                    });
+                });
+                savingsGoals.sort((a, b) => a.createdAt < b.createdAt ? -1 : 1);
+                goalsLoadError = false;
+            } catch (error) {
+                console.error('No se pudieron obtener los objetivos de ahorro:', error);
+                savingsGoals = [];
+                goalsLoadError = true;
+            }
+        }
+
+        function getSavingsTotalUSD() {
+            return savingsGoals.reduce((acc, g) => acc + toUSD(g.saved, g.currency), 0);
+        }
+
+        function renderGoalsList() {
+            const container = document.getElementById('goals-list');
+            if (!container) return;
+            const emptyMsg = document.getElementById('goals-empty-msg');
+
+            container.innerHTML = '';
+            emptyMsg.textContent = goalsLoadError
+                ? 'No se pudieron leer los objetivos. Revisá que la colección "objetivosAhorro" tenga permisos en las reglas de Firestore.'
+                : (savingsGoals.length === 0 ? 'Todavía no creaste ningún objetivo de ahorro.' : '');
+
+            savingsGoals.forEach(goal => {
+                const pct = goal.target > 0 ? (goal.saved / goal.target) * 100 : 0;
+                const done = goal.target > 0 && goal.saved >= goal.target;
+                const remaining = Math.max(goal.target - goal.saved, 0);
+                const usdNote = goal.currency === 'ARS'
+                    ? (cclRate ? ` · ≈ ${formatMoney(toUSD(goal.saved, 'ARS'))}` : ' · sin cotización CCL')
+                    : '';
+
+                container.innerHTML += `
+                    <div class="bg-gray-900 border border-gray-700 rounded-lg p-4">
+                        <div class="flex justify-between items-start mb-2">
+                            <div class="min-w-0">
+                                <span class="font-bold text-blue-400 block truncate">${escapeHtml(goal.name)}</span>
+                                <span class="text-xs ${done ? 'text-green-400' : 'text-gray-500'} block">${done ? '¡Objetivo cumplido!' : `Faltan ${formatByCurrency(remaining, goal.currency)}`}</span>
+                            </div>
+                            <div class="flex gap-3 flex-shrink-0 ml-2">
+                                <button onclick="openGoalModal('${goal.id}')" class="text-gray-400 hover:text-white text-sm" title="Editar">
+                                    <i class="fas fa-pencil-alt"></i>
+                                </button>
+                                <button onclick="deleteGoal('${goal.id}')" class="text-gray-500 hover:text-red-400 text-sm" title="Eliminar">
+                                    <i class="fas fa-trash-alt"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <p class="text-xl font-bold text-white">${formatByCurrency(goal.saved, goal.currency)} <span class="text-sm font-normal text-gray-500">de ${formatByCurrency(goal.target, goal.currency)}</span></p>
+                        <div class="w-full bg-gray-700 rounded-full h-2 mt-2 overflow-hidden">
+                            <div class="${done ? 'bg-green-500' : 'bg-blue-500'} h-2 rounded-full" style="width:${Math.min(Math.max(pct, 0), 100).toFixed(1)}%"></div>
+                        </div>
+                        <p class="text-xs text-gray-500 mt-1">${pct.toFixed(1)}% completado${usdNote}</p>
+                        <div class="flex gap-2 mt-3">
+                            <button onclick="openGoalMoveModal('${goal.id}', 'deposit')" class="flex-1 bg-gray-700 hover:bg-gray-600 text-xs font-semibold py-1.5 rounded transition">
+                                <i class="fas fa-arrow-down mr-1 text-green-400"></i> Aportar
+                            </button>
+                            <button onclick="openGoalMoveModal('${goal.id}', 'withdraw')" class="flex-1 bg-gray-700 hover:bg-gray-600 text-xs font-semibold py-1.5 rounded transition">
+                                <i class="fas fa-arrow-up mr-1 text-red-400"></i> Retirar
+                            </button>
+                        </div>
+                    </div>
+                `;
+            });
+
+            document.getElementById('goals-total-summary').textContent = `Total ahorrado: ${formatMoney(getSavingsTotalUSD())}`;
+        }
+
+        function openGoalModal(id = null) {
+            const goal = id ? savingsGoals.find(g => g.id === id) : null;
+            document.getElementById('goal-edit-id').value = goal ? goal.id : '';
+            document.getElementById('goal-name').value = goal ? goal.name : '';
+            document.getElementById('goal-target').value = goal ? goal.target : '';
+            const currencySelect = document.getElementById('goal-currency');
+            currencySelect.value = goal ? goal.currency : 'USD';
+            // La moneda no se cambia una vez que ya hay plata ahorrada (habría que convertirla)
+            currencySelect.disabled = !!goal && goal.saved > 0;
+            document.getElementById('goal-modal-title').textContent = goal ? 'Editar Objetivo' : 'Nuevo Objetivo';
+            document.getElementById('goal-submit-btn').textContent = goal ? 'Guardar Cambios' : 'Crear Objetivo';
+            toggleModal('goal-modal');
+        }
+
+        async function saveGoal(e) {
+            e.preventDefault();
+            const editId = document.getElementById('goal-edit-id').value;
+            const name = document.getElementById('goal-name').value.trim();
+            const currency = document.getElementById('goal-currency').value;
+            const target = parseFloat(document.getElementById('goal-target').value);
+
+            if (!name || !(target > 0)) {
+                alert('Completá el nombre y un monto objetivo válido.');
+                return;
+            }
+
+            if (editId) {
+                await db.collection('objetivosAhorro').doc(editId).update({ name, currency, target });
+            } else {
+                await db.collection('objetivosAhorro').add({
+                    name,
+                    currency,
+                    target,
+                    saved: 0,
+                    createdAt: new Date().toISOString(),
+                    movements: []
+                });
+            }
+
+            toggleModal('goal-modal');
+            fetchPortfolio();
+        }
+
+        async function deleteGoal(id) {
+            const goal = savingsGoals.find(g => g.id === id);
+            if (!goal) return;
+            const warning = goal.saved > 0
+                ? `¿Eliminar "${goal.name}"? Los ${formatByCurrency(goal.saved, goal.currency)} ahorrados dejan de contar en tu patrimonio (como si los hubieras gastado). Si querés devolverlos a un Cash, usá "Retirar" antes.`
+                : `¿Eliminar el objetivo "${goal.name}"?`;
+            if (!confirm(warning)) return;
+            await db.collection('objetivosAhorro').doc(id).delete();
+            fetchPortfolio();
+        }
+
+        function openGoalMoveModal(id, type) {
+            const goal = savingsGoals.find(g => g.id === id);
+            if (!goal) return;
+            document.getElementById('goal-move-id').value = id;
+            document.getElementById('goal-move-type').value = type;
+            document.getElementById('goal-move-amount').value = '';
+            document.getElementById('goal-move-info').textContent =
+                `${goal.name} — ahorrado ${formatByCurrency(goal.saved, goal.currency)} de ${formatByCurrency(goal.target, goal.currency)}`;
+            updateGoalMoveForm();
+            toggleModal('goal-move-modal');
+        }
+
+        // Ajusta textos y opciones del modal de aporte/retiro según el tipo elegido.
+        // Con `onlyHint` sólo refresca la ayuda (equivalente en USD), sin rearmar el <select>.
+        function updateGoalMoveForm(onlyHint = false) {
+            const goal = savingsGoals.find(g => g.id === document.getElementById('goal-move-id').value);
+            if (!goal) return;
+            const isDeposit = document.getElementById('goal-move-type').value === 'deposit';
+            const select = document.getElementById('goal-move-source');
+
+            if (!onlyHint) {
+                document.getElementById('goal-move-title').textContent = isDeposit ? 'Aportar' : 'Retirar';
+                document.getElementById('goal-move-amount-label').textContent = `Monto (${goal.currency})`;
+                document.getElementById('goal-move-source-label').textContent = isDeposit ? '¿De dónde sale la plata?' : '¿A dónde va la plata?';
+                select.innerHTML =
+                    `<option value="externo">${isDeposit ? 'Otro medio (plata de afuera de la app)' : 'Afuera de la app (la gasté / la saqué)'}</option>`
+                    + buildCashOptions(null);
+            }
+
+            const amount = parseFloat(document.getElementById('goal-move-amount').value);
+            const hint = document.getElementById('goal-move-hint');
+            if (select.value === 'externo') {
+                hint.textContent = isDeposit
+                    ? 'No se descuenta de ningún Cash: suma a tu patrimonio.'
+                    : 'No se acredita en ningún Cash: sale de tu patrimonio.';
+            } else if (goal.currency === 'ARS') {
+                hint.textContent = !cclRate
+                    ? 'No hay cotización CCL disponible para convertir pesos a dólares.'
+                    : (amount > 0
+                        ? `Equivale a ${formatMoney(toUSD(amount, 'ARS'))} al CCL de hoy ($${cclRate.toLocaleString('es-AR')}).`
+                        : 'El Cash está en dólares: se convierte al CCL de hoy.');
+            } else {
+                hint.textContent = isDeposit ? 'Se descuenta de ese Cash.' : 'Se acredita en ese Cash.';
+            }
+        }
+
+        async function saveGoalMove(e) {
+            e.preventDefault();
+            const goal = savingsGoals.find(g => g.id === document.getElementById('goal-move-id').value);
+            if (!goal) return;
+            const isDeposit = document.getElementById('goal-move-type').value === 'deposit';
+            const amount = parseFloat(document.getElementById('goal-move-amount').value);
+            const source = document.getElementById('goal-move-source').value;
+
+            if (!(amount > 0)) {
+                alert('Ingresá un monto válido.');
+                return;
+            }
+            if (!isDeposit && amount > goal.saved + 0.005) {
+                alert('No podés retirar más de lo que hay ahorrado en este objetivo.');
+                return;
+            }
+
+            const todayKey = new Date().toISOString().slice(0, 10);
+            if (source !== 'externo') {
+                if (goal.currency === 'ARS' && !cclRate) {
+                    alert('No hay cotización CCL disponible para convertir los pesos a dólares. Probá de nuevo en un rato o usá "Otro medio".');
+                    return;
+                }
+                const holding = cashHoldings.find(h => h.id === source);
+                if (!holding) return;
+                const amountUSD = toUSD(amount, goal.currency);
+                if (isDeposit && amountUSD > getCurrentCashBalance(holding, todayKey) + 0.005) {
+                    alert(`No alcanza el saldo de ${holding.currency} · ${holding.platform} para aportar ${formatMoney(amountUSD)}.`);
+                    return;
+                }
+                await applyCashMovement(source, isDeposit ? -amountUSD : amountUSD, todayKey);
+            }
+
+            const newSaved = Math.max(goal.saved + (isDeposit ? amount : -amount), 0);
+            const movement = {
+                date: new Date().toISOString(),
+                amount: isDeposit ? amount : -amount,
+                source: source === 'externo' ? 'externo' : 'cash',
+                cashHoldingId: source === 'externo' ? null : source
+            };
+            await db.collection('objetivosAhorro').doc(goal.id).update({
+                saved: newSaved,
+                movements: [...goal.movements, movement]
+            });
+
+            toggleModal('goal-move-modal');
+            fetchPortfolio();
+        }
+
+        // =====================================================================
+        // PRÉSTAMOS: deudas propias (lo que debo). Colección "prestamos". El saldo
+        // pendiente resta del Patrimonio Total; los pagos pueden descontarse de un
+        // Cash o hacerse con plata externa.
+        // =====================================================================
+        async function fetchLoans() {
+            try {
+                const snapshot = await db.collection('prestamos').get();
+                loans = [];
+                snapshot.forEach(doc => {
+                    const d = doc.data();
+                    loans.push({
+                        id: doc.id,
+                        name: d.name || 'Préstamo',
+                        lender: d.lender || '',
+                        currency: d.currency === 'ARS' ? 'ARS' : 'USD',
+                        original: Number(d.original) || 0,
+                        balance: Number(d.balance) || 0,
+                        dueDate: d.dueDate || '',
+                        createdAt: d.createdAt || new Date().toISOString().slice(0, 10),
+                        payments: Array.isArray(d.payments) ? d.payments : []
+                    });
+                });
+                loans.sort((a, b) => a.createdAt < b.createdAt ? -1 : 1);
+                loansLoadError = false;
+            } catch (error) {
+                console.error('No se pudieron obtener los préstamos:', error);
+                loans = [];
+                loansLoadError = true;
+            }
+        }
+
+        function getDebtTotalUSD() {
+            return loans.reduce((acc, l) => acc + toUSD(l.balance, l.currency), 0);
+        }
+
+        function renderLoansList() {
+            const container = document.getElementById('loans-list');
+            if (!container) return;
+            const emptyMsg = document.getElementById('loans-empty-msg');
+
+            container.innerHTML = '';
+            emptyMsg.textContent = loansLoadError
+                ? 'No se pudieron leer los préstamos. Revisá que la colección "prestamos" tenga permisos en las reglas de Firestore.'
+                : (loans.length === 0 ? 'No tenés ningún préstamo registrado.' : '');
+
+            loans.forEach(loan => {
+                const paid = Math.max(loan.original - loan.balance, 0);
+                const pct = loan.original > 0 ? (paid / loan.original) * 100 : 0;
+                const settled = loan.balance <= 0.005;
+                const usdNote = loan.currency === 'ARS'
+                    ? (cclRate ? ` · ≈ ${formatMoney(toUSD(loan.balance, 'ARS'))}` : ' · sin cotización CCL')
+                    : '';
+                const dueLabel = loan.dueDate
+                    ? ` · vence ${new Date(loan.dueDate + 'T00:00:00').toLocaleDateString('es-AR')}`
+                    : '';
+
+                container.innerHTML += `
+                    <div class="bg-gray-900 border border-gray-700 rounded-lg p-4">
+                        <div class="flex justify-between items-start mb-2">
+                            <div class="min-w-0">
+                                <span class="font-bold text-blue-400 block truncate">${escapeHtml(loan.name)}</span>
+                                <span class="text-xs text-gray-500 block truncate">${loan.lender ? escapeHtml(loan.lender) : 'Sin acreedor'}${dueLabel}</span>
+                            </div>
+                            <div class="flex gap-3 flex-shrink-0 ml-2">
+                                <button onclick="openLoanModal('${loan.id}')" class="text-gray-400 hover:text-white text-sm" title="Editar">
+                                    <i class="fas fa-pencil-alt"></i>
+                                </button>
+                                <button onclick="deleteLoan('${loan.id}')" class="text-gray-500 hover:text-red-400 text-sm" title="Eliminar">
+                                    <i class="fas fa-trash-alt"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <p class="text-xl font-bold ${settled ? 'text-green-400' : 'text-red-400'}">${settled ? 'Saldado' : formatByCurrency(loan.balance, loan.currency)} <span class="text-sm font-normal text-gray-500">${settled ? '' : 'pendiente'}</span></p>
+                        <div class="w-full bg-gray-700 rounded-full h-2 mt-2 overflow-hidden">
+                            <div class="bg-green-500 h-2 rounded-full" style="width:${Math.min(Math.max(pct, 0), 100).toFixed(1)}%"></div>
+                        </div>
+                        <p class="text-xs text-gray-500 mt-1">Pagado ${formatByCurrency(paid, loan.currency)} de ${formatByCurrency(loan.original, loan.currency)} (${pct.toFixed(1)}%)${settled ? '' : usdNote}</p>
+                        ${settled ? '' : `
+                        <div class="flex gap-2 mt-3">
+                            <button onclick="openLoanPayModal('${loan.id}')" class="flex-1 bg-gray-700 hover:bg-gray-600 text-xs font-semibold py-1.5 rounded transition">
+                                <i class="fas fa-money-bill-wave mr-1 text-green-400"></i> Registrar pago
+                            </button>
+                        </div>`}
+                    </div>
+                `;
+            });
+
+            document.getElementById('loans-total-summary').textContent = `Deuda total: ${formatMoney(getDebtTotalUSD())}`;
+        }
+
+        function openLoanModal(id = null) {
+            const loan = id ? loans.find(l => l.id === id) : null;
+            document.getElementById('loan-edit-id').value = loan ? loan.id : '';
+            document.getElementById('loan-name').value = loan ? loan.name : '';
+            document.getElementById('loan-lender').value = loan ? loan.lender : '';
+            document.getElementById('loan-currency').value = loan ? loan.currency : 'USD';
+            document.getElementById('loan-original').value = loan ? loan.original : '';
+            document.getElementById('loan-balance').value = loan ? loan.balance : '';
+            document.getElementById('loan-due').value = loan ? loan.dueDate : '';
+            document.getElementById('loan-modal-title').textContent = loan ? 'Editar Préstamo' : 'Nuevo Préstamo';
+            document.getElementById('loan-submit-btn').textContent = loan ? 'Guardar Cambios' : 'Registrar Préstamo';
+            toggleModal('loan-modal');
+        }
+
+        async function saveLoan(e) {
+            e.preventDefault();
+            const editId = document.getElementById('loan-edit-id').value;
+            const name = document.getElementById('loan-name').value.trim();
+            const lender = document.getElementById('loan-lender').value.trim();
+            const currency = document.getElementById('loan-currency').value;
+            const original = parseFloat(document.getElementById('loan-original').value);
+            const balanceRaw = document.getElementById('loan-balance').value;
+            const balance = balanceRaw === '' ? original : parseFloat(balanceRaw);
+            const dueDate = document.getElementById('loan-due').value || '';
+
+            if (!name || !(original > 0) || isNaN(balance) || balance < 0) {
+                alert('Completá la descripción, el monto del préstamo y un saldo pendiente válido.');
+                return;
+            }
+
+            const data = { name, lender, currency, original, balance, dueDate };
+            if (editId) {
+                await db.collection('prestamos').doc(editId).update(data);
+            } else {
+                await db.collection('prestamos').add({ ...data, createdAt: new Date().toISOString(), payments: [] });
+            }
+
+            toggleModal('loan-modal');
+            fetchPortfolio();
+        }
+
+        async function deleteLoan(id) {
+            const loan = loans.find(l => l.id === id);
+            if (!loan) return;
+            const warning = loan.balance > 0.005
+                ? `¿Eliminar "${loan.name}"? Todavía tiene ${formatByCurrency(loan.balance, loan.currency)} pendientes, que van a dejar de restar de tu patrimonio.`
+                : `¿Eliminar el préstamo "${loan.name}"?`;
+            if (!confirm(warning)) return;
+            await db.collection('prestamos').doc(id).delete();
+            fetchPortfolio();
+        }
+
+        function openLoanPayModal(id) {
+            const loan = loans.find(l => l.id === id);
+            if (!loan) return;
+            document.getElementById('loan-pay-id').value = id;
+            document.getElementById('loan-pay-amount').value = '';
+            document.getElementById('loan-pay-amount-label').textContent = `Monto pagado (${loan.currency})`;
+            document.getElementById('loan-pay-info').textContent =
+                `${loan.name} — saldo pendiente ${formatByCurrency(loan.balance, loan.currency)}`;
+            document.getElementById('loan-pay-source').innerHTML =
+                '<option value="externo">Otro medio (plata de afuera de la app)</option>' + buildCashOptions(null);
+            updateLoanPayHint();
+            toggleModal('loan-pay-modal');
+        }
+
+        function updateLoanPayHint() {
+            const loan = loans.find(l => l.id === document.getElementById('loan-pay-id').value);
+            if (!loan) return;
+            const amount = parseFloat(document.getElementById('loan-pay-amount').value);
+            const hint = document.getElementById('loan-pay-hint');
+            if (document.getElementById('loan-pay-source').value === 'externo') {
+                hint.textContent = 'No se descuenta de ningún Cash.';
+            } else if (loan.currency === 'ARS') {
+                hint.textContent = !cclRate
+                    ? 'No hay cotización CCL disponible para convertir pesos a dólares.'
+                    : (amount > 0
+                        ? `Se descuentan ${formatMoney(toUSD(amount, 'ARS'))} de ese Cash, al CCL de hoy ($${cclRate.toLocaleString('es-AR')}).`
+                        : 'El Cash está en dólares: se convierte al CCL de hoy.');
+            } else {
+                hint.textContent = 'Se descuenta de ese Cash.';
+            }
+        }
+
+        async function saveLoanPayment(e) {
+            e.preventDefault();
+            const loan = loans.find(l => l.id === document.getElementById('loan-pay-id').value);
+            if (!loan) return;
+            const amount = parseFloat(document.getElementById('loan-pay-amount').value);
+            const source = document.getElementById('loan-pay-source').value;
+
+            if (!(amount > 0)) {
+                alert('Ingresá un monto válido.');
+                return;
+            }
+            if (amount > loan.balance + 0.005) {
+                alert(`El pago supera el saldo pendiente (${formatByCurrency(loan.balance, loan.currency)}).`);
+                return;
+            }
+
+            const todayKey = new Date().toISOString().slice(0, 10);
+            if (source !== 'externo') {
+                if (loan.currency === 'ARS' && !cclRate) {
+                    alert('No hay cotización CCL disponible para convertir los pesos a dólares. Probá de nuevo en un rato o usá "Otro medio".');
+                    return;
+                }
+                const holding = cashHoldings.find(h => h.id === source);
+                if (!holding) return;
+                const amountUSD = toUSD(amount, loan.currency);
+                if (amountUSD > getCurrentCashBalance(holding, todayKey) + 0.005) {
+                    alert(`No alcanza el saldo de ${holding.currency} · ${holding.platform} para pagar ${formatMoney(amountUSD)}.`);
+                    return;
+                }
+                await applyCashMovement(source, -amountUSD, todayKey);
+            }
+
+            const payment = {
+                date: new Date().toISOString(),
+                amount,
+                source: source === 'externo' ? 'externo' : 'cash',
+                cashHoldingId: source === 'externo' ? null : source
+            };
+            await db.collection('prestamos').doc(loan.id).update({
+                balance: Math.max(loan.balance - amount, 0),
+                payments: [...loan.payments, payment]
+            });
+
+            toggleModal('loan-pay-modal');
+            fetchPortfolio();
+        }
+
+        async function fetchPortfolio() {
+            // Traemos el portfolio, la cotización del CCL, el historial de patrimonio,
+            // el Cash y los planes DCA en paralelo para no encadenar esperas innecesarias.
+            const [snapshot] = await Promise.all([
+                db.collection("inversiones").get(),
+                fetchCCLRate(),
+                fetchEvolutionHistory(),
+                fetchCashHoldings(),
+                fetchDcaPlans(),
+                fetchSavingsGoals(),
+                fetchLoans()
+            ]);
+
+            portfolio = [];
+            snapshot.forEach(doc => {
+                let data = doc.data();
+                if (!data.history) {
+                    data.history = [{
+                        date: new Date().toISOString(),
+                        type: 'buy',
+                        shares: data.shares,
+                        price: data.avgPrice
+                    }];
+                }
+                portfolio.push({ id: doc.id, ...data });
+            });
+            
+            await mergeDuplicatePositions();
+
+            renderTable();
+            await loadPrices();
+
+            // Ponemos al día los planes DCA que correspondan (ver runDueDcaExecutions):
+            // acredita la cripto y descuenta el Cash de origen si pasó al menos 1 día
+            // desde la última ejecución. No hace nada si ya ejecutó hoy.
+            await runDueDcaExecutions();
+
+            // Con los precios ya cargados, fijamos el orden según currentSort
+            // (por defecto P/L de mayor a menor). loadPrices() en sí NO ordena
+            // (ver más abajo), así que el botón "Actualizar" nunca reordena filas;
+            // esto solo corre como parte de la carga/recarga completa del portfolio.
+            applySort();
+            renderTable();
+            renderCashList();
+            renderDcaList();
+            renderGoalsList();
+            renderLoansList();
+
+            // Guardamos el registro de patrimonio de HOY (se actualiza, no se duplica,
+            // si ya se había guardado antes en el día) y refrescamos el gráfico de
+            // evolución. Esto NO se repite en cada click de "Actualizar" (ver loadPrices),
+            // para no escribir de más en Firestore. Se incluye el Cash (capital + interés)
+            // tanto en el valor como en lo "invertido", así un depósito de Cash no
+            // aparece como ganancia — sólo el interés generado sí cuenta como tal.
+            const totalInvested = portfolio.reduce((acc, a) => acc + (Number(a.shares) || 0) * (Number(a.avgPrice) || 0), 0);
+            const totalCurrentValue = portfolio.reduce((acc, a) => acc + (Number(a.shares) || 0) * (Number(a.currentPrice) || 0), 0);
+            const { cashValue, cashPrincipal } = getCashTotals();
+            // Ahorro suma y Préstamos resta, en el valor Y en lo "invertido": así
+            // aportar a un objetivo, tomar una deuda o pagarla no aparece como
+            // ganancia ni pérdida en el modo "Ganancias".
+            const savingsValue = getSavingsTotalUSD();
+            const debtValue = getDebtTotalUSD();
+            await recordDailySnapshot(
+                totalCurrentValue + cashValue + savingsValue - debtValue,
+                totalInvested + cashPrincipal + savingsValue - debtValue
+            );
+            renderEvolutionChart();
+        }
+
+        // Fusiona posiciones duplicadas del mismo activo que sólo difieren en
+        // mayúsculas/minúsculas (ej: "BITCOIN" cargado a mano + "bitcoin" creado por
+        // un plan DCA antes de que recordBuy las unificara). Queda una sola posición
+        // (la más antigua) con la suma de unidades, el costo promedio ponderado y
+        // todo el historial junto. Si no hay duplicadas no escribe nada.
+        async function mergeDuplicatePositions() {
+            const groups = {};
+            portfolio.forEach(asset => {
+                const key = `${asset.type}|${String(asset.ticker || '').toLowerCase()}`;
+                (groups[key] = groups[key] || []).push(asset);
+            });
+
+            const firstDate = asset => (asset.history || []).reduce(
+                (min, h) => (!min || (h.date && h.date < min)) ? h.date : min, null) || '9999';
+
+            for (const group of Object.values(groups)) {
+                if (group.length < 2) continue;
+                group.sort((a, b) => firstDate(a) < firstDate(b) ? -1 : 1);
+                const keeper = group[0];
+
+                let shares = 0;
+                let cost = 0;
+                let history = [];
+                group.forEach(asset => {
+                    const s = Number(asset.shares) || 0;
+                    shares += s;
+                    cost += s * (Number(asset.avgPrice) || 0);
+                    history = history.concat(asset.history || []);
+                });
+                history.sort((a, b) => new Date(a.date) - new Date(b.date));
+                const avgPrice = shares > 0 ? cost / shares : 0;
+
+                try {
+                    // Batch: o se aplica todo (actualizar + borrar duplicadas) o nada
+                    const batch = db.batch();
+                    batch.update(db.collection('inversiones').doc(keeper.id), { shares, avgPrice, history });
+                    group.slice(1).forEach(dup => batch.delete(db.collection('inversiones').doc(dup.id)));
+                    await batch.commit();
+                } catch (error) {
+                    console.error(`No se pudieron fusionar las posiciones duplicadas de ${keeper.ticker}:`, error);
+                    continue;
+                }
+
+                keeper.shares = shares;
+                keeper.avgPrice = avgPrice;
+                keeper.history = history;
+                const duplicates = group.slice(1);
+                portfolio = portfolio.filter(asset => !duplicates.includes(asset));
+            }
+        }
+
+        // Registra una compra (manual, vía CEDEAR o vía DCA) en Firestore y refleja
+        // el cambio en el array `portfolio` en memoria. `meta` permite taggear la
+        // entrada del historial (ej: {dca:true}) sin duplicar esta lógica en 3 lugares.
+        async function recordBuy(ticker, type, shares, price, date, meta = {}) {
+            // Sin distinguir mayúsculas: "BITCOIN" (cargado a mano) y "bitcoin" (plan DCA)
+            // son la misma posición, así las compras del DCA se suman a la que ya existía.
+            const tickerKey = String(ticker).toLowerCase();
+            const existingIndex = portfolio.findIndex(item => String(item.ticker || '').toLowerCase() === tickerKey);
+
+            if (existingIndex >= 0) {
+                const existing = portfolio[existingIndex];
+                const totalCost = (Number(existing.shares) || 0) * (Number(existing.avgPrice) || 0) + shares * price;
+                const totalShares = (Number(existing.shares) || 0) + shares;
+                const newAvgPrice = totalShares > 0 ? totalCost / totalShares : 0;
+
+                const newHistoryEntry = { date, type: 'buy', shares, price, ...meta };
+                const updatedHistory = [...(existing.history || []), newHistoryEntry];
+
+                await db.collection("inversiones").doc(existing.id).update({
+                    shares: totalShares,
+                    avgPrice: newAvgPrice,
+                    history: updatedHistory
+                });
+
+                existing.shares = totalShares;
+                existing.avgPrice = newAvgPrice;
+                existing.history = updatedHistory;
+            } else {
+                const newHistoryEntry = { date, type: 'buy', shares, price, ...meta };
+                const docRef = await db.collection("inversiones").add({
+                    ticker: ticker,
+                    type: type,
+                    shares: shares,
+                    avgPrice: price,
+                    currentPrice: price,
+                    history: [newHistoryEntry]
+                });
+                portfolio.push({ id: docRef.id, ticker, type, shares, avgPrice: price, currentPrice: price, history: [newHistoryEntry] });
+            }
+        }
+
+        // Cambia qué campos del modal "+Transacción" se muestran, según el modo elegido
+        function setTxMode(mode) {
+            txMode = mode;
+            const activeClass = 'bg-blue-600 text-white';
+            const inactiveClass = 'text-gray-400 hover:text-white';
+            document.getElementById('btn-txmode-usd').className = `flex-1 px-2 py-1.5 rounded-md transition ${mode === 'usd' ? activeClass : inactiveClass}`;
+            document.getElementById('btn-txmode-cedear').className = `flex-1 px-2 py-1.5 rounded-md transition ${mode === 'cedear' ? activeClass : inactiveClass}`;
+            document.getElementById('btn-txmode-cash').className = `flex-1 px-2 py-1.5 rounded-md transition ${mode === 'cash' ? activeClass : inactiveClass}`;
+
+            document.getElementById('txmode-usd-fields').classList.toggle('hidden', mode !== 'usd');
+            document.getElementById('txmode-cedear-fields').classList.toggle('hidden', mode !== 'cedear');
+            document.getElementById('txmode-cash-fields').classList.toggle('hidden', mode !== 'cash');
+
+            const dateLabel = document.getElementById('date-field-label');
+            dateLabel.textContent = mode === 'cash' ? 'Fecha desde la que corre el interés (opcional)' : 'Fecha (opcional)';
+
+            if (mode === 'cedear' && cclRate && !document.getElementById('cedear-ccl').value) {
+                document.getElementById('cedear-ccl').value = cclRate;
+            }
+            updateCedearPreview();
+        }
+
+        // Calculadora en vivo del modo CEDEAR: a partir de cuántos CEDEARs compraste,
+        // el ratio y lo que pagaste en pesos, calcula las acciones equivalentes y el
+        // precio por acción en USD (usando el CCL indicado), para que no haya que
+        // hacer la cuenta a mano ni buscar el ratio y el CCL por separado.
+        function updateCedearPreview() {
+            const preview = document.getElementById('cedear-preview');
+            if (!preview) return;
+
+            const cantidad = parseFloat(document.getElementById('cedear-cantidad').value);
+            const ratio = parseFloat(document.getElementById('cedear-ratio').value);
+            const montoARS = parseFloat(document.getElementById('cedear-monto-ars').value);
+            const ccl = parseFloat(document.getElementById('cedear-ccl').value);
+
+            if (!(cantidad > 0) || !(ratio > 0) || !(montoARS > 0) || !(ccl > 0)) {
+                preview.textContent = 'Completá los campos para ver el cálculo.';
+                return;
+            }
+
+            const accionesEquivalentes = cantidad / ratio;
+            const montoUSD = montoARS / ccl;
+            const precioPorAccionUSD = montoUSD / accionesEquivalentes;
+
+            preview.innerHTML = `≈ <span class="font-bold text-white">${accionesEquivalentes.toFixed(6)}</span> acciones equivalentes ·
+                monto total <span class="font-bold text-white">${formatMoney(montoUSD)}</span> ·
+                precio por acción <span class="font-bold text-white">${formatMoney(precioPorAccionUSD)}</span>`;
+        }
+
+        async function addTransaction(e) {
+            e.preventDefault();
+            const btn = document.getElementById('btn-save');
+            btn.textContent = "Guardando...";
+            btn.disabled = true;
+
+            try {
+                const dateInputValue = document.getElementById('date').value;
+                const date = dateInputValue ? datetimeLocalToIso(dateInputValue) : new Date().toISOString();
+
+                if (txMode === 'usd') {
+                    const ticker = document.getElementById('ticker').value.toUpperCase();
+                    const type = document.getElementById('type').value;
+                    const shares = parseFloat(document.getElementById('shares').value);
+                    const price = parseFloat(document.getElementById('price').value);
+                    if (!ticker || !(shares > 0) || !(price > 0)) {
+                        alert('Completá ticker, cantidad y precio.');
+                        return;
+                    }
+                    await recordBuy(ticker, type, shares, price, date);
+
+                } else if (txMode === 'cedear') {
+                    const ticker = document.getElementById('cedear-ticker').value.toUpperCase();
+                    const cantidad = parseFloat(document.getElementById('cedear-cantidad').value);
+                    const ratio = parseFloat(document.getElementById('cedear-ratio').value);
+                    const montoARS = parseFloat(document.getElementById('cedear-monto-ars').value);
+                    const ccl = parseFloat(document.getElementById('cedear-ccl').value);
+                    if (!ticker || !(cantidad > 0) || !(ratio > 0) || !(montoARS > 0) || !(ccl > 0)) {
+                        alert('Completá ticker, cantidad de CEDEARs, ratio, monto en ARS y el CCL usado.');
+                        return;
+                    }
+                    const accionesEquivalentes = cantidad / ratio;
+                    const montoUSD = montoARS / ccl;
+                    const precioPorAccionUSD = montoUSD / accionesEquivalentes;
+                    await recordBuy(ticker, 'stock', accionesEquivalentes, precioPorAccionUSD, date);
+
+                } else if (txMode === 'cash') {
+                    const amount = parseFloat(document.getElementById('cash-amount').value);
+                    const currency = document.getElementById('cash-currency').value;
+                    const platform = document.getElementById('cash-platform').value;
+                    const rate = parseFloat(document.getElementById('cash-rate').value) || 0;
+                    if (!(amount > 0)) {
+                        alert('Ingresá un monto de Cash válido.');
+                        return;
+                    }
+                    await saveCashHoldingCore(amount, currency, platform, rate, date.slice(0, 10));
+                }
+
+                toggleModal('add-modal');
+                document.getElementById('add-form').reset();
+                setTxMode('usd');
+                fetchPortfolio();
+            } finally {
+                btn.textContent = "Guardar";
+                btn.disabled = false;
+            }
+        }
+
+        // Agrupa las entradas del historial tageadas como DCA por mes (para no ver
+        // una fila nueva por cada microcompra diaria del DCA); las entradas
+        // manuales se muestran individuales, igual que antes. `idx` en cada fila es
+        // el índice real dentro de asset.history (el que usa openEditEntryModal).
+        function buildHistoryDisplayRows(history) {
+            const rows = [];
+            const dcaBuckets = {};
+
+            history.forEach((entry, idx) => {
+                if (entry.dca) {
+                    const monthKey = entry.date.slice(0, 7); // YYYY-MM
+                    if (!dcaBuckets[monthKey]) {
+                        dcaBuckets[monthKey] = { monthKey, entries: [], totalShares: 0, totalCost: 0, lastDate: entry.date };
+                    }
+                    const bucket = dcaBuckets[monthKey];
+                    bucket.entries.push({ ...entry, idx });
+                    bucket.totalShares += Number(entry.shares) || 0;
+                    bucket.totalCost += (Number(entry.shares) || 0) * (Number(entry.price) || 0);
+                    if (entry.date > bucket.lastDate) bucket.lastDate = entry.date;
+                } else {
+                    rows.push({ kind: 'single', date: entry.date, entry, idx });
+                }
+            });
+
+            Object.values(dcaBuckets).forEach(bucket => {
+                rows.push({
+                    kind: 'dca-group',
+                    date: bucket.lastDate,
+                    monthKey: bucket.monthKey,
+                    count: bucket.entries.length,
+                    totalShares: bucket.totalShares,
+                    avgPrice: bucket.totalShares > 0 ? bucket.totalCost / bucket.totalShares : 0,
+                    entries: bucket.entries
+                });
+            });
+
+            rows.sort((a, b) => new Date(a.date) - new Date(b.date));
+            return rows;
+        }
+
+        function toggleDcaGroupDetail(monthKey) {
+            const row = document.getElementById(`dca-detail-${monthKey}`);
+            if (row) row.classList.toggle('hidden');
+        }
+
+        function openDetails(index) {
+            activeAssetIndex = index;
+            const asset = portfolio[index];
+            
+            document.getElementById('detail-ticker').textContent = asset.ticker;
+            document.getElementById('detail-shares').textContent = asset.shares;
+            document.getElementById('detail-avg-price').textContent = formatMoney(Number(asset.avgPrice) || 0);
+            
+            // Ordenamos el historial cronológicamente (relevante ahora que la fecha se puede editar)
+            asset.history.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+            const tbody = document.getElementById('history-table');
+            tbody.innerHTML = '';
+
+            const displayRows = buildHistoryDisplayRows(asset.history);
+
+            displayRows.forEach(row => {
+                if (row.kind === 'single') {
+                    const entry = row.entry;
+                    const isBuy = entry.type === 'buy';
+                    const typeClass = isBuy ? 'text-green-400' : 'text-red-400';
+                    const typeLabel = isBuy ? 'Compra' : 'Venta';
+                    const sign = isBuy ? '+' : '-';
+                    const dateObj = new Date(entry.date);
+                    const dateStr = dateObj.toLocaleDateString() + ' ' + dateObj.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+
+                    tbody.innerHTML += `
+                        <tr class="hover:bg-gray-800">
+                            <td class="p-3 text-gray-400">${dateStr}</td>
+                            <td class="p-3 font-semibold ${typeClass}">${typeLabel}</td>
+                            <td class="p-3 text-right">${sign}${entry.shares}</td>
+                            <td class="p-3 text-right">${formatMoney(entry.price)}</td>
+                            <td class="p-3 text-right font-bold">${formatMoney(entry.shares * entry.price)}</td>
+                            <td class="p-3 text-center">
+                                <button onclick="openEditEntryModal(${row.idx})" class="text-blue-400 hover:text-blue-300">
+                                    <i class="fas fa-pencil-alt"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                } else {
+                    // Grupo de compras DCA del mes, resumido en una sola fila (expandible)
+                    const monthLabel = new Date(row.monthKey + '-01T00:00:00').toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
+                    const totalCost = row.totalShares * row.avgPrice;
+
+                    tbody.innerHTML += `
+                        <tr class="hover:bg-gray-800 bg-gray-800/40">
+                            <td class="p-3 text-gray-400" colspan="2">
+                                <button type="button" onclick="toggleDcaGroupDetail('${row.monthKey}')" class="text-left flex items-center gap-2 text-gray-300 hover:text-white">
+                                    <i class="fas fa-chevron-right text-[10px]"></i>
+                                    <span>DCA · ${monthLabel} <span class="text-gray-500">(${row.count} compras)</span></span>
+                                </button>
+                            </td>
+                            <td class="p-3 text-right">+${row.totalShares.toFixed(6)}</td>
+                            <td class="p-3 text-right">${formatMoney(row.avgPrice)}<span class="text-[10px] text-gray-500 block">prom.</span></td>
+                            <td class="p-3 text-right font-bold">${formatMoney(totalCost)}</td>
+                            <td class="p-3 text-center text-gray-600">—</td>
+                        </tr>
+                        <tr id="dca-detail-${row.monthKey}" class="hidden bg-gray-900/60">
+                            <td colspan="6" class="p-3">
+                                <div class="max-h-40 overflow-y-auto text-xs space-y-1">
+                                    ${row.entries.map(e => `<div class="flex justify-between text-gray-400"><span>${new Date(e.date).toLocaleDateString()}</span><span>+${Number(e.shares).toFixed(6)} @ ${formatMoney(e.price)}</span></div>`).join('')}
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                }
+            });
+
+            document.getElementById('sell-form').reset();
+            toggleModal('details-modal');
+        }
+
+        function openEditEntryModal(entryIndex) {
+            const asset = portfolio[activeAssetIndex];
+            const entry = asset.history[entryIndex];
+            
+            document.getElementById('edit-entry-index').value = entryIndex;
+            document.getElementById('edit-entry-shares').value = entry.shares;
+            document.getElementById('edit-entry-price').value = entry.price;
+            document.getElementById('edit-entry-date').value = isoToDatetimeLocal(entry.date);
+            
+            toggleModal('edit-entry-modal');
+        }
+
+        async function saveEntryEdit(e) {
+            e.preventDefault();
+            const entryIndex = parseInt(document.getElementById('edit-entry-index').value);
+            const newShares = parseFloat(document.getElementById('edit-entry-shares').value);
+            const newPrice = parseFloat(document.getElementById('edit-entry-price').value);
+            const newDateValue = document.getElementById('edit-entry-date').value;
+
+            const asset = portfolio[activeAssetIndex];
+            asset.history[entryIndex].shares = newShares;
+            asset.history[entryIndex].price = newPrice;
+            if (newDateValue) {
+                asset.history[entryIndex].date = datetimeLocalToIso(newDateValue);
+            }
+
+            // Reordenamos por si la nueva fecha cambió la posición cronológica del asiento
+            asset.history.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+            // Recalcular posición total y costo promedio (Number() estricto para evitar NaN)
+            let totalShares = 0;
+            let totalCost = 0;
+
+            asset.history.forEach(h => {
+                const hShares = Number(h.shares) || 0;
+                const hPrice = Number(h.price) || 0;
+                if (h.type === 'buy') {
+                    totalShares += hShares;
+                    totalCost += (hShares * hPrice);
+                } else {
+                    totalShares -= hShares;
+                }
+            });
+
+            const newAvgPrice = totalShares > 0 ? (totalCost / totalShares) : 0;
+
+            await db.collection("inversiones").doc(asset.id).update({
+                shares: totalShares,
+                avgPrice: newAvgPrice,
+                history: asset.history
+            });
+
+            toggleModal('edit-entry-modal');
+            openDetails(activeAssetIndex);
+            fetchPortfolio();
+        }
+
+        async function registerSale(e) {
+            e.preventDefault();
+            const asset = portfolio[activeAssetIndex];
+            const sellShares = parseFloat(document.getElementById('sell-shares').value);
+            const sellPrice = parseFloat(document.getElementById('sell-price').value);
+            
+            if (sellShares > asset.shares) {
+                alert("No puedes vender más unidades de las que tienes.");
+                return;
+            }
+
+            const newShares = asset.shares - sellShares;
+            const date = new Date().toISOString();
+            
+            const newHistoryEntry = { date: date, type: 'sell', shares: sellShares, price: sellPrice };
+            const updatedHistory = [...asset.history, newHistoryEntry];
+
+            if (newShares === 0) {
+                await db.collection("inversiones").doc(asset.id).delete();
+                toggleModal('details-modal');
+            } else {
+                await db.collection("inversiones").doc(asset.id).update({
+                    shares: newShares,
+                    history: updatedHistory
+                });
+                asset.shares = newShares;
+                asset.history = updatedHistory;
+                openDetails(activeAssetIndex);
+            }
+            
+            fetchPortfolio();
+        }
+
+        async function deleteAsset() {
+            if(confirm("¿Seguro que quieres borrar todo el registro de este activo?")) {
+                const asset = portfolio[activeAssetIndex];
+                await db.collection("inversiones").doc(asset.id).delete();
+                toggleModal('details-modal');
+                fetchPortfolio();
+            }
+        }
+
+        // Aplica el criterio de orden actual (currentSort) sobre portfolio, sin
+        // alternar asc/desc. La usan tanto sortData() (clic en columnas) como
+        // fetchPortfolio() (para fijar el orden por defecto al cargar).
+        function applySort() {
+            const column = currentSort.column;
+
+            portfolio.sort((a, b) => {
+                // Parseo estricto a Number para evitar comparaciones erráticas
+                // (strings, undefined, null, o valores NaN quedan normalizados a 0)
+                const sharesA = Number(a.shares) || 0;
+                const sharesB = Number(b.shares) || 0;
+                const avgA = Number(a.avgPrice) || 0;
+                const avgB = Number(b.avgPrice) || 0;
+                const curA = Number(a.currentPrice) || 0;
+                const curB = Number(b.currentPrice) || 0;
+
+                const investedA = sharesA * avgA;
+                const investedB = sharesB * avgB;
+                const valueA = sharesA * curA;
+                const valueB = sharesB * curB;
+                const plA = valueA - investedA;
+                const plB = valueB - investedB;
+
+                let valA, valB;
+                let isString = false;
+
+                switch (column) {
+                    case 'ticker':
+                        valA = String(a.ticker || '').toUpperCase();
+                        valB = String(b.ticker || '').toUpperCase();
+                        isString = true;
+                        break;
+                    case 'shares': valA = sharesA; valB = sharesB; break;
+                    case 'avgPrice': valA = avgA; valB = avgB; break;
+                    case 'currentPrice': valA = curA; valB = curB; break;
+                    case 'invested': valA = investedA; valB = investedB; break;
+                    case 'value': valA = valueA; valB = valueB; break;
+                    case 'pl': valA = plA; valB = plB; break;
+                    default: valA = 0; valB = 0;
+                }
+
+                const comparison = isString ? valA.localeCompare(valB) : valA - valB;
+                return currentSort.asc ? comparison : -comparison;
+            });
+        }
+
+        function sortData(column) {
+            if (currentSort.column === column) {
+                currentSort.asc = !currentSort.asc;
+            } else {
+                currentSort.column = column;
+                currentSort.asc = false;
+            }
+
+            applySort();
+            renderTable();
+        }
+
+        // Reemplazá 'TU_API_KEY_AQUI' por la clave gratuita que te da Finnhub.io
+        const FINNHUB_KEY = 'dahlkn9r01qvl9bpu4l0dahlkn9r01qvl9bpu4lg';
+
+        async function loadPrices() {
+            const btn = document.getElementById('btn-update');
+            if (btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Actualizando...';
+
+            const pricePromises = portfolio.map(async (asset) => {
+                try {
+                    if (asset.type === 'crypto') {
+                        const ticker = asset.ticker.toLowerCase();
+                        // include_24hr_change=true agrega "usd_24h_change" a la respuesta,
+                        // así no hace falta una segunda llamada para la variación diaria.
+                        const res = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ticker}&vs_currencies=usd&include_24hr_change=true`);
+                        const data = await res.json();
+                        if (data[ticker]) {
+                            asset.currentPrice = data[ticker].usd;
+                            if (typeof data[ticker].usd_24h_change === 'number') {
+                                asset.dailyChangePct = data[ticker].usd_24h_change;
+                            }
+                        }
+                    } else {
+                        // Limpiar el ticker si tiene sufijos (ej: AAPL -> AAPL)
+                        const cleanTicker = asset.ticker.split('.')[0].toUpperCase();
+                        
+                        // Finnhub responde directo sin bloqueos CORS
+                        const res = await fetch(`https://finnhub.io/api/v1/quote?symbol=${cleanTicker}&token=${FINNHUB_KEY}`);
+                        const data = await res.json();
+                        
+                        // 'c' es la propiedad de Finnhub para el precio actual (Current Price)
+                        if (data && data.c && data.c > 0) {
+                            asset.currentPrice = data.c;
+                            // 'dp' es el % de variación vs. el cierre anterior ('pc'); si no viene,
+                            // lo calculamos nosotros a partir de 'pc' como respaldo.
+                            if (typeof data.dp === 'number') {
+                                asset.dailyChangePct = data.dp;
+                            } else if (data.pc > 0) {
+                                asset.dailyChangePct = ((data.c - data.pc) / data.pc) * 100;
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.error(`Error obteniendo precio de ${asset.ticker}:`, error);
+                }
+            });
+
+            await Promise.all(pricePromises);
+            // No llamamos a sortData(): eso reordenaba las filas cada vez que se
+            // actualizaban los precios. Con renderTable() solo se refrescan los
+            // montos, manteniendo la posición actual de cada fila en la tabla.
+            renderTable();
+            if (btn) btn.innerHTML = '<i class="fas fa-sync-alt mr-1"></i> Actualizar';
+        }
+
+        // Gráfico con porcentajes adaptativos (oculta textos de menos del 8% para no amontonar)
+        function updateChart(labels, dataValues, colors) {
+            const canvas = document.getElementById('portfolioChart');
+            const ctx = canvas.getContext('2d');
+
+            // Destruimos la instancia previa antes de crear una nueva para evitar
+            // que Chart.js quede con referencias colgantes al canvas (causa de glitches)
+            if (myChart) {
+                myChart.destroy();
+                myChart = null;
+            }
+
+            myChart = new Chart(ctx, {
+                type: 'pie',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: dataValues,
+                        // Colores consistentes por ticker (ver getColorForTicker), no por posición,
+                        // así el color de cada activo no cambia al reordenar la tabla
+                        backgroundColor: colors,
+                        borderWidth: 1,
+                        borderColor: '#1F2937'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    // Sin animación: al reordenar la tabla o actualizar precios se destruye
+                    // y recrea el gráfico, y sin esto se veía la animación de "llenado"
+                    // completa cada vez, aunque los datos casi no hubieran cambiado.
+                    animation: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return ' ' + formatMoney(context.parsed);
+                                }
+                            }
+                        },
+                        datalabels: {
+                            color: '#ffffff',
+                            font: { weight: 'bold', size: 11 },
+                            formatter: (value, ctx) => {
+                                const dataArr = ctx.chart.data.datasets[0].data;
+                                const sum = dataArr.reduce((acc, v) => acc + (Number(v) || 0), 0);
+                                const pct = sum > 0 ? (value * 100 / sum) : 0;
+                                // Si la porción es menor al 8%, se oculta para no deformar el recuadro
+                                return pct >= 8 ? pct.toFixed(1) + "%" : '';
+                            },
+                            anchor: 'center',
+                            align: 'center'
+                        }
+                    }
+                }
+            });
+        }
+
+        // Calcula el % y el $ de variación de hoy comparando contra el registro
+        // guardado más reciente anterior al día de hoy (el "último cierre" disponible).
+        function updateDailyChangeCard(totalCurrentValue) {
+            const todayKey = new Date().toISOString().slice(0, 10);
+            // evolutionHistory está ordenado ascendente por fecha: recorriéndolo al
+            // revés, el primero que sea anterior a hoy es el más reciente de todos.
+            const previous = [...evolutionHistory].reverse().find(entry => entry.date < todayKey);
+
+            const pctElement = document.getElementById('daily-change-pct');
+            const amountElement = document.getElementById('daily-change-amount');
+            const refElement = document.getElementById('daily-change-ref');
+
+            if (!previous || !(previous.totalValue > 0)) {
+                pctElement.textContent = '—';
+                pctElement.className = 'text-3xl md:text-4xl font-bold mt-2 text-gray-400';
+                amountElement.textContent = '';
+                refElement.textContent = 'Todavía no hay un registro previo para comparar';
+                return;
+            }
+
+            const change = totalCurrentValue - previous.totalValue;
+            const pct = (change / previous.totalValue) * 100;
+            const sign = change >= 0 ? '+' : '';
+            const colorClass = change >= 0 ? 'text-green-500' : 'text-red-500';
+
+            pctElement.textContent = `${sign}${pct.toFixed(2)}%`;
+            pctElement.className = `text-3xl md:text-4xl font-bold mt-2 ${colorClass}`;
+            amountElement.textContent = `${sign}${formatMoney(change)}`;
+            const prevDateLabel = new Date(previous.date + 'T00:00:00').toLocaleDateString('es-AR');
+            refElement.textContent = `Desde el último registro (${prevDateLabel})`;
+        }
+
+        // Fecha de inicio (YYYY-MM-DD) para cada rango predefinido del gráfico de evolución
+        function getRangeStartDate(range) {
+            const now = new Date();
+            const start = new Date(now);
+            switch (range) {
+                case '1M': start.setMonth(start.getMonth() - 1); break;
+                case '6M': start.setMonth(start.getMonth() - 6); break;
+                case '1A': start.setFullYear(start.getFullYear() - 1); break;
+                case 'YTD': return `${now.getFullYear()}-01-01`;
+                default: return null; // 'MAX' u otros: sin filtro
+            }
+            return start.toISOString().slice(0, 10);
+        }
+
+        function getFilteredEvolutionData() {
+            if (evolutionRange === 'CUSTOM') {
+                if (!evolutionCustomStart || !evolutionCustomEnd) return [];
+                return evolutionHistory.filter(e => e.date >= evolutionCustomStart && e.date <= evolutionCustomEnd);
+            }
+            if (evolutionRange === 'MAX') return evolutionHistory;
+
+            const startKey = getRangeStartDate(evolutionRange);
+            return startKey ? evolutionHistory.filter(e => e.date >= startKey) : evolutionHistory;
+        }
+
+        function formatEvolutionLabel(dateKey) {
+            const d = new Date(dateKey + 'T00:00:00');
+            return d.toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: '2-digit' });
+        }
+
+        // Gráfico de línea con 2 modos: "Patrimonio" (valor total, salta con los
+        // depósitos/compras) y "Ganancias" (valor - invertido, no se mueve por
+        // depósitos, sólo refleja la ganancia/pérdida real del portfolio).
+        function renderEvolutionChart() {
+            const data = getFilteredEvolutionData();
+
+            document.getElementById('evolution-count').textContent =
+                `${evolutionHistory.length} registro${evolutionHistory.length === 1 ? '' : 's'}`;
+
+            document.getElementById('evolution-empty-msg').textContent = data.length === 0
+                ? 'Todavía no hay registros para graficar en este período.'
+                : '';
+
+            const labels = data.map(e => formatEvolutionLabel(e.date));
+            const values = data.map(e => evolutionMode === 'ganancias'
+                ? (e.totalValue - e.totalInvested)
+                : e.totalValue
+            );
+
+            const canvas = document.getElementById('evolutionChart');
+            const ctx = canvas.getContext('2d');
+
+            if (myEvolutionChart) {
+                myEvolutionChart.destroy();
+                myEvolutionChart = null;
+            }
+
+            myEvolutionChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: values,
+                        borderColor: '#10B981',
+                        backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                        pointBackgroundColor: '#10B981',
+                        pointRadius: 4,
+                        pointHoverRadius: 5,
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.35
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    plugins: {
+                        legend: { display: false },
+                        datalabels: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: (context) => ' ' + formatMoney(context.parsed.y)
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: { color: '#9CA3AF', maxRotation: 0, autoSkip: true },
+                            grid: { display: false }
+                        },
+                        y: {
+                            ticks: {
+                                color: '#9CA3AF',
+                                callback: (value) => formatMoney(value)
+                            },
+                            grid: { color: 'rgba(255,255,255,0.06)' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateEvolutionModeButtons() {
+            const activeClass = 'bg-green-600 text-white';
+            const inactiveClass = 'text-gray-400 hover:text-white';
+            document.getElementById('btn-mode-total').className =
+                `px-3 py-1.5 rounded-md transition ${evolutionMode === 'total' ? activeClass : inactiveClass}`;
+            document.getElementById('btn-mode-ganancias').className =
+                `px-3 py-1.5 rounded-md transition ${evolutionMode === 'ganancias' ? activeClass : inactiveClass}`;
+        }
+
+        function setEvolutionMode(mode) {
+            evolutionMode = mode;
+            updateEvolutionModeButtons();
+            renderEvolutionChart();
+        }
+
+        function updateEvolutionRangeButtons() {
+            document.querySelectorAll('.range-btn').forEach(btn => {
+                const isActive = btn.id === `btn-range-${evolutionRange}`;
+                btn.className = `range-btn px-3 py-1 rounded-full transition ${isActive ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`;
+            });
+        }
+
+        function setEvolutionRange(range) {
+            evolutionRange = range;
+            document.getElementById('custom-range-inputs').classList.toggle('hidden', range !== 'CUSTOM');
+            updateEvolutionRangeButtons();
+            if (range !== 'CUSTOM') {
+                renderEvolutionChart();
+            }
+        }
+
+        function applyCustomRange() {
+            const start = document.getElementById('custom-range-start').value;
+            const end = document.getElementById('custom-range-end').value;
+            if (!start || !end) return;
+            evolutionCustomStart = start;
+            evolutionCustomEnd = end;
+            renderEvolutionChart();
+        }
+
+        function renderTable() {
+            const tbody = document.getElementById('portfolio-table');
+            tbody.innerHTML = '';
+            
+            let totalInvested = 0;
+            let totalCurrentValue = 0;
+
+            portfolio.forEach((asset, index) => {
+                const shares = Number(asset.shares) || 0;
+                const avgPrice = Number(asset.avgPrice) || 0;
+                const currentPrice = Number(asset.currentPrice) || 0;
+                const dailyChangePct = Number(asset.dailyChangePct);
+                const hasDailyChange = !isNaN(dailyChangePct);
+
+                const invested = shares * avgPrice;
+                const currentValue = shares * currentPrice;
+                const pl = currentValue - invested;
+                const plPercentage = invested > 0 ? ((pl / invested) * 100).toFixed(2) : 0;
+                
+                totalInvested += invested;
+                totalCurrentValue += currentValue;
+
+                const plColor = pl >= 0 ? 'text-green-500' : 'text-red-500';
+                const dailyColor = hasDailyChange ? (dailyChangePct >= 0 ? 'text-green-500' : 'text-red-500') : 'text-gray-500';
+                const dailySign = hasDailyChange && dailyChangePct >= 0 ? '+' : '';
+                const dailyLabel = hasDailyChange ? `${dailySign}${dailyChangePct.toFixed(2)}%` : '—';
+
+                tbody.innerHTML += `
+                    <tr class="hover:bg-gray-800 transition border-b border-gray-700/50">
+                        <td class="p-4">
+                            <div class="flex items-center gap-2">
+                                <span class="font-bold text-blue-400">${asset.ticker}</span>
+                                <span class="bg-gray-800/90 text-gray-300 text-xs px-2 py-0.5 rounded-md border border-gray-700/60 font-mono inline-flex items-center">${shares.toFixed(2)} u.</span>
+                            </div>
+                            <div class="text-[10px] text-gray-500 uppercase">${asset.type}</div>
+                        </td>
+                        <td class="p-4 text-center font-semibold">${formatMoney(currentPrice)}</td>
+                        <td class="p-4 text-center text-gray-400">${formatMoney(invested)}</td>
+                        <td class="p-4 text-center font-bold">${formatMoney(currentValue)}</td>
+                        <td class="p-4 text-center font-semibold ${dailyColor}">${dailyLabel}</td>
+                        <td class="p-4 text-center font-bold ${plColor}">
+                            ${formatMoney(pl)} <br><span class="text-xs font-normal opacity-80">${plPercentage}%</span>
+                        </td>
+                        <td class="p-4 text-center">
+                            <button onclick="openDetails(${index})" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1 rounded text-sm transition">
+                                <i class="fas fa-eye mr-1"></i> Detalle
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            const totalPL = totalCurrentValue - totalInvested;
+            const totalPLPercentage = totalInvested > 0 ? (totalPL / totalInvested) * 100 : 0;
+            const plSign = totalPL >= 0 ? '+' : '';
+
+            // ----- Tarjetas de la página "Inversiones" (sólo acciones/cripto, sin Cash) -----
+            const invValorActual = document.getElementById('inv-valor-actual');
+            if (invValorActual) invValorActual.textContent = formatMoney(totalCurrentValue);
+            const invInvertidoRef = document.getElementById('inv-invertido-ref');
+            if (invInvertidoRef) invInvertidoRef.textContent = `Invertido: ${formatMoney(totalInvested)}`;
+            const invRendimientoPct = document.getElementById('inv-rendimiento-pct');
+            if (invRendimientoPct) {
+                invRendimientoPct.textContent = `${plSign}${totalPLPercentage.toFixed(2)}%`;
+                invRendimientoPct.className = `text-3xl md:text-4xl font-bold mt-2 ${totalPL >= 0 ? 'text-green-500' : 'text-red-500'}`;
+            }
+            const invRendimientoMonto = document.getElementById('inv-rendimiento-monto');
+            if (invRendimientoMonto) invRendimientoMonto.textContent = `${plSign}${formatMoney(totalPL)}`;
+
+            // ----- Tarjeta "Patrimonio Total" (Panel General): posiciones + Cash -----
+            // El Cash (capital + interés devengado) se suma al patrimonio; el capital
+            // del Cash también se suma a "invertido" para que un depósito de Cash no
+            // se vea como una "ganancia" (sólo el interés generado cuenta como tal).
+            const { cashValue, cashPrincipal } = getCashTotals();
+            const savingsValue = getSavingsTotalUSD();
+            const debtValue = getDebtTotalUSD();
+            const patrimonioValue = totalCurrentValue + cashValue + savingsValue - debtValue;
+
+            const assetCountLabel = `${portfolio.length} inversion${portfolio.length === 1 ? '' : 'es'} activa${portfolio.length === 1 ? '' : 's'}`;
+            const arsLabel = cclRate ? formatARS(patrimonioValue * cclRate) : 'ARS no disponible';
+
+            document.getElementById('total-value-usd').textContent = formatMoney(patrimonioValue);
+            document.getElementById('total-value-ars').textContent = arsLabel;
+            document.getElementById('total-assets-count').textContent = assetCountLabel;
+
+            // Modal de detalle (se abre al tocar la tarjeta de Patrimonio Total)
+            document.getElementById('modal-total-usd').textContent = formatMoney(patrimonioValue);
+            document.getElementById('modal-total-ars').textContent = arsLabel;
+            document.getElementById('modal-total-invested').textContent = formatMoney(totalInvested);
+            const modalPlElement = document.getElementById('modal-total-pl');
+            modalPlElement.textContent = `${formatMoney(totalPL)} (${plSign}${totalPLPercentage.toFixed(2)}%)`;
+            modalPlElement.className = totalPL >= 0 ? "font-bold text-green-500" : "font-bold text-red-500";
+            document.getElementById('modal-asset-count').textContent = portfolio.length;
+            document.getElementById('modal-cash-total').textContent = formatMoney(cashValue);
+            document.getElementById('modal-savings-total').textContent = formatMoney(savingsValue);
+            document.getElementById('modal-debt-total').textContent = debtValue > 0 ? `-${formatMoney(debtValue)}` : formatMoney(0);
+            document.getElementById('modal-ccl-rate').textContent = cclRate
+                ? `$${cclRate.toLocaleString('es-AR')} ARS/USD`
+                : 'No disponible';
+            document.getElementById('modal-ccl-updated').textContent = cclUpdatedAt
+                ? `Cotización actualizada: ${new Date(cclUpdatedAt).toLocaleString('es-AR')}`
+                : '';
+
+            // Tarjeta "Rendimiento Diario": % y $ vs. el último registro guardado (incluye Cash)
+            updateDailyChangeCard(patrimonioValue);
+
+            // El gráfico se arma SIEMPRE a partir de una copia del portfolio ordenada
+            // alfabéticamente por ticker (no del orden actual de la tabla), para que
+            // las porciones mantengan una posición fija sin importar cómo el usuario
+            // haya ordenado la tabla principal.
+            const chartSource = [...portfolio].sort((a, b) =>
+                String(a.ticker || '').toUpperCase().localeCompare(String(b.ticker || '').toUpperCase())
+            );
+
+            let chartLabels = [];
+            let chartData = [];
+            let chartColors = [];
+
+            chartSource.forEach(asset => {
+                const shares = Number(asset.shares) || 0;
+                const currentPrice = Number(asset.currentPrice) || 0;
+                const currentValue = shares * currentPrice;
+
+                if (currentValue > 0) {
+                    chartLabels.push(asset.ticker);
+                    chartData.push(currentValue);
+                    chartColors.push(getTickerColor(asset.ticker));
+                }
+            });
+
+            updateChart(chartLabels, chartData, chartColors);
+        }
+
+        // Si Firestore rechaza una escritura (o falla cualquier guardado), avisamos
+        // en vez de dejar el modal abierto sin explicación.
+        window.addEventListener('unhandledrejection', event => {
+            const err = event.reason || {};
+            console.error('Error no manejado:', err);
+            if (err.code === 'permission-denied') {
+                alert('Firestore rechazó la operación por permisos.\n\nSi estabas en Ahorro o Préstamos: falta habilitar las colecciones "objetivosAhorro" y "prestamos" en las reglas de Firestore (Firebase Console → Firestore Database → Reglas).');
+            } else {
+                alert('No se pudo guardar: ' + (err.message || err));
+            }
+        });
+
+        document.addEventListener('DOMContentLoaded', () => {
+            showPage('dashboard');
+            setTxMode('usd');
+            updateEvolutionModeButtons();
+            updateEvolutionRangeButtons();
+            fetchPortfolio();
+        });
+    </script>
+</body>
+</html>
