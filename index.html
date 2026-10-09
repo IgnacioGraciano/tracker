@@ -36,6 +36,14 @@
 
                 <!-- ================= PANEL GENERAL ================= -->
                 <div id="page-dashboard" class="page-section">
+                    <!-- Barra superior: refrescar precios (y con eso el patrimonio) -->
+                    <div class="flex items-center justify-end gap-3 mb-4">
+                        <span class="text-[11px] text-gray-500" id="last-refresh-label"></span>
+                        <button onclick="refreshPrices()" class="btn-refresh text-sm text-blue-400 hover:text-blue-300 bg-gray-700 px-3 py-1 rounded-full transition-all">
+                            <i class="fas fa-sync-alt mr-1"></i> Actualizar
+                        </button>
+                    </div>
+
                     <!-- Sección Superior: Resumen y Gráfico -->
                     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
                         <!-- Patrimonio Total (clic para ver detalle: invertido, P/L, etc.) -->
@@ -49,7 +57,7 @@
                             <p class="text-xs text-gray-500 mt-3" id="total-assets-count">0 inversiones activas</p>
                         </button>
 
-                        <!-- Rendimiento del día (vs. el último registro guardado) -->
+                        <!-- Rendimiento del día (vs. el cierre de ayer, sin contar depósitos ni retiros) -->
                         <div class="bg-gray-800 p-6 rounded-xl shadow-md border border-gray-700 flex flex-col justify-center">
                             <div class="flex items-start justify-between">
                                 <h3 class="text-gray-400 text-xs font-semibold uppercase tracking-wider">Rendimiento Diario</h3>
@@ -74,11 +82,12 @@
                         <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
                             <h3 class="text-base font-bold flex items-center gap-2">
                                 <i class="fas fa-chart-line text-blue-400"></i> Evolución Patrimonial
-                                <span class="text-xs font-normal text-gray-500" id="evolution-count">0 registros</span>
+                                <span class="text-xs font-normal text-gray-500" id="evolution-count">0 días</span>
                             </h3>
                             <div class="flex bg-gray-900 rounded-lg p-1 text-xs font-semibold">
                                 <button type="button" onclick="setEvolutionMode('total')" id="btn-mode-total" class="px-3 py-1.5 rounded-md transition">Patrimonio</button>
                                 <button type="button" onclick="setEvolutionMode('ganancias')" id="btn-mode-ganancias" class="px-3 py-1.5 rounded-md transition">Ganancias</button>
+                                <button type="button" onclick="setEvolutionMode('diario')" id="btn-mode-diario" class="px-3 py-1.5 rounded-md transition">Diario</button>
                             </div>
                         </div>
                         <div class="flex flex-wrap items-center gap-2 mb-4 text-xs">
@@ -99,6 +108,7 @@
                             <canvas id="evolutionChart"></canvas>
                         </div>
                         <p class="text-[11px] text-gray-500 mt-3 text-center" id="evolution-empty-msg"></p>
+                        <p class="text-[11px] text-gray-600 mt-1 text-center">Un punto por día: los días en que no entraste se reconstruyen con tus movimientos y los precios históricos. Las ganancias y el rendimiento diario no cuentan depósitos ni retiros.</p>
                     </div>
                 </div>
 
@@ -121,7 +131,7 @@
                     <div class="bg-gray-800 rounded-xl shadow-md overflow-hidden border border-gray-700 mb-8">
                         <div class="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-800">
                             <h2 class="text-lg font-bold">Posiciones Abiertas</h2>
-                            <button onclick="loadPrices()" class="text-sm text-blue-400 hover:text-blue-300 bg-gray-700 px-3 py-1 rounded-full transition-all" id="btn-update">
+                            <button onclick="refreshPrices()" class="btn-refresh text-sm text-blue-400 hover:text-blue-300 bg-gray-700 px-3 py-1 rounded-full transition-all" id="btn-update">
                                 <i class="fas fa-sync-alt mr-1"></i> Actualizar
                             </button>
                         </div>
@@ -178,7 +188,7 @@
                         <div class="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-800">
                             <div>
                                 <h2 class="text-lg font-bold">Cripto DCA</h2>
-                                <p class="text-xs text-gray-500 mt-0.5">Compras automáticas y recurrentes, descontadas de tu Cash</p>
+                                <p class="text-xs text-gray-500 mt-0.5">Compras automáticas diarias a las 8:00 (hora Argentina), al precio de mercado de ese momento, descontadas de tu Cash</p>
                             </div>
                             <button onclick="openDcaModal()" class="text-sm text-blue-400 hover:text-blue-300 bg-gray-700 px-3 py-1 rounded-full transition-all">
                                 <i class="fas fa-plus mr-1"></i> Nuevo Plan
@@ -789,8 +799,12 @@
         // --- Patrimonio en ARS (dólar CCL) y evolución histórica ---
         let cclRate = null;          // cotización CCL (venta), pesos por dólar
         let cclUpdatedAt = null;     // hora de la última cotización obtenida
-        let evolutionHistory = [];   // [{date:'YYYY-MM-DD', totalValue, totalInvested}, ...] ascendente
-        let evolutionMode = 'total'; // 'total' (patrimonio) | 'ganancias'
+        let evolutionHistory = [];   // registros guardados (1 por día que entraste), ascendente. Ver fetchEvolutionHistory
+        let historicalCloses = {};   // tickerKey -> {from, to, closes:{'YYYY-MM-DD': precio de cierre}} (ver loadHistoricalCloses)
+        let pricesReady = false;     // true cuando ya se cargaron precios actuales e históricos (antes no se calcula el rendimiento)
+        let isRefreshing = false;    // evita cargas/actualizaciones superpuestas
+        let dcaRunning = false;      // evita ejecutar dos veces el mismo DCA si se superponen dos cargas
+        let evolutionMode = 'total'; // 'total' (patrimonio) | 'ganancias' | 'diario'
         let evolutionRange = 'MAX';  // '1M' | '6M' | '1A' | 'YTD' | 'MAX' | 'CUSTOM'
         let evolutionCustomStart = null;
         let evolutionCustomEnd = null;
@@ -920,23 +934,30 @@
                     cclUpdatedAt = data.fechaActualizacion || new Date().toISOString();
                 }
             } catch (error) {
+                // Si falla una actualización, se mantiene la última cotización obtenida (si había)
                 console.error('No se pudo obtener la cotización del dólar CCL:', error);
-                cclRate = null;
             }
         }
 
         // Trae el historial de patrimonio guardado en Firestore (colección nueva
         // "historialPatrimonio"), con un documento por día (id = fecha "YYYY-MM-DD").
+        // Sólo existen los días en que se abrió la app; los días intermedios se
+        // reconstruyen en buildDailySeries(). Los registros nuevos guardan además el
+        // desglose "otros" (Cash + Ahorro - Préstamos) y los precios de cada activo.
         async function fetchEvolutionHistory() {
             try {
-                const snapshot = await db.collection('historialPatrimonio').orderBy('date', 'asc').limit(1000).get();
+                const snapshot = await db.collection('historialPatrimonio').orderBy('date', 'asc').limit(5000).get();
                 evolutionHistory = [];
                 snapshot.forEach(doc => {
                     const d = doc.data();
                     evolutionHistory.push({
                         date: d.date,
                         totalValue: Number(d.totalValue) || 0,
-                        totalInvested: Number(d.totalInvested) || 0
+                        totalInvested: Number(d.totalInvested) || 0,
+                        timestamp: d.timestamp || null,
+                        otherValue: d.otherValue != null ? Number(d.otherValue) || 0 : null,
+                        otherInvested: d.otherInvested != null ? Number(d.otherInvested) || 0 : null,
+                        prices: d.prices && typeof d.prices === 'object' ? d.prices : null
                     });
                 });
             } catch (error) {
@@ -950,6 +971,39 @@
             const a = new Date(dateKeyA + 'T00:00:00Z');
             const b = new Date(dateKeyB + 'T00:00:00Z');
             return Math.round((b - a) / 86400000);
+        }
+
+        // Fechas "YYYY-MM-DD" en UTC, igual que el resto de la app (ids del historial, lastUpdated, etc.)
+        function getTodayKey() {
+            return new Date().toISOString().slice(0, 10);
+        }
+
+        function utcDayKey(value) {
+            const d = new Date(value);
+            return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+        }
+
+        function addDaysToKey(dateKey, days) {
+            const d = new Date(dateKey + 'T00:00:00Z');
+            d.setUTCDate(d.getUTCDate() + days);
+            return d.toISOString().slice(0, 10);
+        }
+
+        // Día hábil (lunes a viernes) anterior a `dateKey`
+        function previousWeekdayKey(dateKey) {
+            let key = addDaysToKey(dateKey, -1);
+            while ([0, 6].includes(new Date(key + 'T00:00:00Z').getUTCDay())) key = addDaysToKey(key, -1);
+            return key;
+        }
+
+        // Clave para unificar un activo sin importar mayúsculas ("BITCOIN" = "bitcoin")
+        function getTickerKey(ticker) {
+            return String(ticker || '').toLowerCase();
+        }
+
+        // Ticker de acción "limpio" para las APIs (ej: "BRK.B" -> "BRK"), igual que loadPrices
+        function cleanStockTicker(ticker) {
+            return String(ticker || '').split('.')[0].toUpperCase();
         }
 
         // Trae los saldos de Cash (USDT/USDC) guardados en Firestore (colección nueva "cashHoldings")
@@ -1215,23 +1269,72 @@
         // documento es la fecha, así que entrar varias veces el mismo día sólo
         // actualiza ese único registro en vez de generar uno nuevo cada vez
         // (mantiene la colección chica: como máximo 1 doc por día).
-        async function recordDailySnapshot(totalValue, totalInvested) {
-            const todayKey = new Date().toISOString().slice(0, 10);
+        // Además del total, guarda el desglose "otros" (Cash + Ahorro - Préstamos,
+        // que no se puede reconstruir desde el historial de compras) y el precio de
+        // cada activo (con el cierre anterior de las acciones), que después se usan
+        // para reconstruir los días en que no se abrió la app.
+        async function recordDailySnapshot() {
+            const todayKey = getTodayKey();
+            const live = computeLiveTotals();
+            const prices = {};
+            portfolio.forEach(asset => {
+                const price = Number(asset.currentPrice) || 0;
+                if (!(price > 0)) return;
+                const quote = { p: price, d: asset.priceDate || todayKey };
+                if (asset.prevClose > 0 && asset.prevCloseDate) {
+                    quote.pc = asset.prevClose;
+                    quote.pcd = asset.prevCloseDate;
+                }
+                prices[getTickerKey(asset.ticker)] = quote;
+            });
+
+            const entry = {
+                date: todayKey,
+                totalValue: live.totalValue,
+                totalInvested: live.totalInvested,
+                timestamp: new Date().toISOString(),
+                investValue: live.investValue,
+                otherValue: live.otherValue,
+                otherInvested: live.otherInvested,
+                prices
+            };
             try {
-                await db.collection('historialPatrimonio').doc(todayKey).set({
-                    date: todayKey,
-                    totalValue: totalValue,
-                    totalInvested: totalInvested,
-                    timestamp: new Date().toISOString()
-                });
+                await db.collection('historialPatrimonio').doc(todayKey).set(entry);
 
                 const idx = evolutionHistory.findIndex(e => e.date === todayKey);
-                const entry = { date: todayKey, totalValue, totalInvested };
                 if (idx >= 0) evolutionHistory[idx] = entry;
                 else evolutionHistory.push(entry);
             } catch (error) {
                 console.error('No se pudo guardar el registro diario de patrimonio:', error);
             }
+        }
+
+        // Totales "en vivo" del patrimonio. "Otros" = Cash + Ahorro - Préstamos; su
+        // parte "invertida" es el capital del Cash + Ahorro - Préstamos, así depositar
+        // Cash, aportar a un objetivo o tomar/pagar una deuda no cuenta como ganancia
+        // (sólo el interés del Cash sí). `totalInvested` usa el costo de las posiciones,
+        // igual que siempre, para no cambiar el significado de lo ya guardado.
+        function computeLiveTotals() {
+            let investValue = 0;
+            let investCost = 0;
+            portfolio.forEach(a => {
+                const shares = Number(a.shares) || 0;
+                investValue += shares * (Number(a.currentPrice) || 0);
+                investCost += shares * (Number(a.avgPrice) || 0);
+            });
+            const { cashValue, cashPrincipal } = getCashTotals();
+            const savingsValue = getSavingsTotalUSD();
+            const debtValue = getDebtTotalUSD();
+            const otherValue = cashValue + savingsValue - debtValue;
+            const otherInvested = cashPrincipal + savingsValue - debtValue;
+            return {
+                investValue,
+                investCost,
+                otherValue,
+                otherInvested,
+                totalValue: investValue + otherValue,
+                totalInvested: investCost + otherInvested
+            };
         }
 
         // Trae los planes de Cripto DCA guardados en Firestore (colección nueva "dcaPlans")
@@ -1358,7 +1461,8 @@
                                 </button>
                             </div>
                         </div>
-                        <p class="text-sm text-gray-300">${formatMoney(plan.monthlyAmount)} / mes <span class="text-gray-500">(≈ ${formatMoney(dailyAmount)}/día)</span></p>
+                        <p class="text-sm text-gray-300">${formatMoney(plan.monthlyAmount)} / mes <span class="text-gray-500">(≈ ${formatMoney(dailyAmount)}/día, a las 8:00 ARG)</span></p>
+                        <p class="text-xs text-gray-500 mt-1">Última compra: ${plan.lastExecuted ? new Date(plan.lastExecuted + 'T00:00:00').toLocaleDateString('es-AR') : 'todavía ninguna'}</p>
                         <p class="text-xs text-gray-500 mt-1">Origen: ${cashSource ? `${cashSource.currency} · ${cashSource.platform}` : 'Cash eliminado'}</p>
                         <p class="text-xs text-gray-500 mt-1">Acreditado hasta ahora: ${formatMoney(plan.totalInvested)}</p>
                     </div>
@@ -1366,53 +1470,126 @@
             });
         }
 
-        // Pone al día los planes DCA activos: si pasaron días desde la última
-        // ejecución (o desde su creación, la primera vez), acredita ese monto
-        // acumulado de una sola vez a la cripto en "Inversiones" y lo descuenta
-        // del Cash de origen. Es seguro llamarla en cada carga: si ya ejecutó
-        // hoy, no hace nada (no duplica compras).
-        // Simplificación consciente: si se saltearon varios días, el catch-up usa
-        // el precio ACTUAL para todo el monto acumulado (no busca el precio
-        // histórico de cada día salteado, para no multiplicar llamadas a la API).
-        async function runDueDcaExecutions() {
-            const todayKey = new Date().toISOString().slice(0, 10);
+        // Las órdenes de DCA se ejecutan todos los días a las 8:00 hora Argentina
+        // (UTC-3, sin horario de verano) = 11:00 UTC.
+        const DCA_HOUR_UTC = 11;
 
-            for (const plan of dcaPlans) {
-                if (!plan.active) continue;
-                if (plan.lastExecuted === todayKey) continue; // ya ejecutó hoy
+        function getDcaExecutionIso(dateKey) {
+            return `${dateKey}T${String(DCA_HOUR_UTC).padStart(2, '0')}:00:00.000Z`;
+        }
 
-                const daysToCharge = plan.lastExecuted
-                    ? daysBetweenDates(plan.lastExecuted, todayKey)
-                    : daysBetweenDates(plan.createdAt, todayKey) + 1; // 1ra vez: incluye el día de creación
+        // Último día cuya orden de las 8:00 ya se ejecutó: hoy si ya pasaron las
+        // 8:00 (hora Argentina), si no, ayer.
+        function getLastDueDcaDay() {
+            const todayKey = getTodayKey();
+            return Date.now() >= Date.parse(getDcaExecutionIso(todayKey)) ? todayKey : addDaysToKey(todayKey, -1);
+        }
 
-                if (daysToCharge <= 0) continue;
-
-                const dailyAmount = plan.monthlyAmount / 30;
-                const totalAmount = dailyAmount * daysToCharge;
-
-                let currentPrice = null;
+        // Precio de mercado de `coinId` a las 8:00 (hora Argentina) de cada día de
+        // `dayKeys` (ascendentes), vía CoinGecko market_chart/range. Con rangos de
+        // hasta 90 días CoinGecko devuelve datos horarios (o cada 5 min si es el
+        // último día), así que se toma el punto más cercano a las 11:00 UTC.
+        // Devuelve {día: precio}; los días que no se pudieron obtener no aparecen.
+        async function fetchDcaPrices(coinId, dayKeys) {
+            const result = {};
+            const CHUNK_DAYS = 80;
+            const MAX_DIFF_MS = 90 * 60000;
+            for (let i = 0; i < dayKeys.length; i += CHUNK_DAYS) {
+                const chunk = dayKeys.slice(i, i + CHUNK_DAYS);
+                const fromMs = Date.parse(getDcaExecutionIso(chunk[0])) - 2 * 3600000;
+                const toMs = Math.min(Date.parse(getDcaExecutionIso(chunk[chunk.length - 1])) + 2 * 3600000, Date.now());
+                let points;
                 try {
-                    const res = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${plan.ticker}&vs_currencies=usd`);
+                    const res = await fetch(`https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}/market_chart/range?vs_currency=usd&from=${Math.floor(fromMs / 1000)}&to=${Math.floor(toMs / 1000)}`);
+                    if (!res.ok) break;
                     const data = await res.json();
-                    if (data[plan.ticker]) currentPrice = data[plan.ticker].usd;
+                    points = (Array.isArray(data.prices) ? data.prices : [])
+                        .filter(p => Array.isArray(p) && Number(p[1]) > 0)
+                        .sort((a, b) => a[0] - b[0]);
                 } catch (error) {
-                    console.error(`No se pudo obtener el precio de ${plan.ticker} para el DCA:`, error);
+                    console.error(`No se pudo obtener el precio histórico de ${coinId} para el DCA:`, error);
+                    break;
                 }
-                if (!currentPrice || !(currentPrice > 0)) continue; // reintenta en la próxima carga
+                if (points.length === 0) break;
 
-                const quantity = totalAmount / currentPrice;
-                const debited = await debitCash(plan.cashHoldingId, totalAmount, todayKey);
-                if (!debited) continue; // el Cash de origen ya no existe
-
-                await recordBuy(plan.ticker, 'crypto', quantity, currentPrice, new Date().toISOString(), { dca: true });
-
-                const newTotalInvested = (plan.totalInvested || 0) + totalAmount;
-                await db.collection('dcaPlans').doc(plan.id).update({
-                    lastExecuted: todayKey,
-                    totalInvested: newTotalInvested
+                const yesterdayKey = addDaysToKey(getTodayKey(), -1);
+                chunk.forEach(dayKey => {
+                    const target = Date.parse(getDcaExecutionIso(dayKey));
+                    let best = null;
+                    points.forEach(p => {
+                        if (!best || Math.abs(p[0] - target) < Math.abs(best[0] - target)) best = p;
+                    });
+                    const diff = best ? Math.abs(best[0] - target) : Infinity;
+                    // Días viejos con algún hueco en los datos: se acepta el punto más
+                    // cercano dentro del día. Para hoy/ayer se exige el de las 8:00
+                    // (si todavía no está publicado, se reintenta en la próxima carga).
+                    const tolerance = dayKey < yesterdayKey ? 12 * 3600000 : MAX_DIFF_MS;
+                    if (diff <= tolerance) result[dayKey] = Number(best[1]);
                 });
-                plan.lastExecuted = todayKey;
-                plan.totalInvested = newTotalInvested;
+            }
+            return result;
+        }
+
+        // Pone al día los planes DCA activos: por cada día pendiente (desde la
+        // última ejecución, o desde su creación la primera vez) registra la compra
+        // diaria al precio de las 8:00 (hora Argentina) de ESE día, aunque no se
+        // haya abierto la app, y descuenta el total del Cash de origen. Es seguro
+        // llamarla en cada carga: los días ya ejecutados no se vuelven a comprar, y
+        // el de hoy recién se compra después de las 8:00.
+        async function runDueDcaExecutions() {
+            if (dcaRunning) return;
+            dcaRunning = true;
+            try {
+                const todayKey = getTodayKey();
+                const lastDueDay = getLastDueDcaDay();
+
+                for (const plan of dcaPlans) {
+                    if (!plan.active) continue;
+
+                    const firstDay = plan.lastExecuted ? addDaysToKey(plan.lastExecuted, 1) : plan.createdAt;
+                    if (!firstDay || firstDay > lastDueDay) continue; // nada pendiente
+
+                    const pendingDays = [];
+                    for (let d = firstDay; d <= lastDueDay; d = addDaysToKey(d, 1)) pendingDays.push(d);
+
+                    const prices = await fetchDcaPrices(plan.ticker, pendingDays);
+                    // Sólo se ejecutan los días seguidos que tienen precio (así
+                    // lastExecuted no deja huecos); el resto se reintenta en la próxima carga.
+                    const executableDays = [];
+                    for (const d of pendingDays) {
+                        if (!(prices[d] > 0)) break;
+                        executableDays.push(d);
+                    }
+                    if (executableDays.length === 0) continue;
+
+                    const dailyAmount = plan.monthlyAmount / 30;
+                    const totalAmount = dailyAmount * executableDays.length;
+
+                    const debited = await debitCash(plan.cashHoldingId, totalAmount, todayKey);
+                    if (!debited) continue; // el Cash de origen ya no existe
+
+                    const executedAt = new Date().toISOString();
+                    const entries = executableDays.map(d => ({
+                        date: getDcaExecutionIso(d),
+                        type: 'buy',
+                        shares: dailyAmount / prices[d],
+                        price: prices[d],
+                        dca: true,
+                        executedAt
+                    }));
+                    await recordBuyEntries(plan.ticker, 'crypto', entries);
+
+                    const lastExecuted = executableDays[executableDays.length - 1];
+                    const newTotalInvested = (plan.totalInvested || 0) + totalAmount;
+                    await db.collection('dcaPlans').doc(plan.id).update({
+                        lastExecuted,
+                        totalInvested: newTotalInvested
+                    });
+                    plan.lastExecuted = lastExecuted;
+                    plan.totalInvested = newTotalInvested;
+                }
+            } finally {
+                dcaRunning = false;
             }
         }
 
@@ -1876,6 +2053,15 @@
         }
 
         async function fetchPortfolio() {
+            setRefreshButtonsLoading(true);
+            try {
+                await loadAllData();
+            } finally {
+                setRefreshButtonsLoading(false);
+            }
+        }
+
+        async function loadAllData() {
             // Traemos el portfolio, la cotización del CCL, el historial de patrimonio,
             // el Cash y los planes DCA en paralelo para no encadenar esperas innecesarias.
             const [snapshot] = await Promise.all([
@@ -1905,12 +2091,20 @@
             await mergeDuplicatePositions();
 
             renderTable();
-            await loadPrices();
 
             // Ponemos al día los planes DCA que correspondan (ver runDueDcaExecutions):
-            // acredita la cripto y descuenta el Cash de origen si pasó al menos 1 día
-            // desde la última ejecución. No hace nada si ya ejecutó hoy.
+            // registra la compra de cada día pendiente al precio de las 8:00 (hora
+            // Argentina) y descuenta el Cash de origen. Va antes de loadPrices para
+            // que una posición nueva creada por el DCA también tome el precio actual.
             await runDueDcaExecutions();
+
+            await loadPrices();
+
+            // Precios de cierre de los días anteriores (para reconstruir día a día
+            // los días en que no se abrió la app). Usa caché local: sólo pide lo que falta.
+            const firstRecord = evolutionHistory.find(e => e.date < getTodayKey());
+            await loadHistoricalCloses(firstRecord ? firstRecord.date : null);
+            pricesReady = true;
 
             // Con los precios ya cargados, fijamos el orden según currentSort
             // (por defecto P/L de mayor a menor). loadPrices() en sí NO ordena
@@ -1925,23 +2119,48 @@
 
             // Guardamos el registro de patrimonio de HOY (se actualiza, no se duplica,
             // si ya se había guardado antes en el día) y refrescamos el gráfico de
-            // evolución. Esto NO se repite en cada click de "Actualizar" (ver loadPrices),
-            // para no escribir de más en Firestore. Se incluye el Cash (capital + interés)
-            // tanto en el valor como en lo "invertido", así un depósito de Cash no
-            // aparece como ganancia — sólo el interés generado sí cuenta como tal.
-            const totalInvested = portfolio.reduce((acc, a) => acc + (Number(a.shares) || 0) * (Number(a.avgPrice) || 0), 0);
-            const totalCurrentValue = portfolio.reduce((acc, a) => acc + (Number(a.shares) || 0) * (Number(a.currentPrice) || 0), 0);
-            const { cashValue, cashPrincipal } = getCashTotals();
-            // Ahorro suma y Préstamos resta, en el valor Y en lo "invertido": así
-            // aportar a un objetivo, tomar una deuda o pagarla no aparece como
-            // ganancia ni pérdida en el modo "Ganancias".
-            const savingsValue = getSavingsTotalUSD();
-            const debtValue = getDebtTotalUSD();
-            await recordDailySnapshot(
-                totalCurrentValue + cashValue + savingsValue - debtValue,
-                totalInvested + cashPrincipal + savingsValue - debtValue
-            );
+            // evolución y la tarjeta de rendimiento diario.
+            await recordDailySnapshot();
+            updateDailyChangeCard();
             renderEvolutionChart();
+            updateLastRefreshLabel();
+        }
+
+        // Botón "Actualizar" (Panel General e Inversiones): vuelve a pedir los precios
+        // y el CCL, recalcula el patrimonio y actualiza el registro de hoy.
+        async function refreshPrices() {
+            if (isRefreshing) return;
+            setRefreshButtonsLoading(true);
+            try {
+                await Promise.all([loadPrices(), fetchCCLRate()]);
+                renderTable();
+                if (currentPage === 'inversiones') renderCashList();
+                if (currentPage === 'ahorro') renderGoalsList();
+                if (currentPage === 'deudas') renderLoansList();
+                await recordDailySnapshot();
+                updateDailyChangeCard();
+                renderEvolutionChart();
+                updateLastRefreshLabel();
+            } finally {
+                setRefreshButtonsLoading(false);
+            }
+        }
+
+        function setRefreshButtonsLoading(loading) {
+            isRefreshing = loading;
+            document.querySelectorAll('.btn-refresh').forEach(btn => {
+                btn.disabled = loading;
+                btn.innerHTML = loading
+                    ? '<i class="fas fa-spinner fa-spin mr-1"></i> Actualizando...'
+                    : '<i class="fas fa-sync-alt mr-1"></i> Actualizar';
+            });
+        }
+
+        function updateLastRefreshLabel() {
+            const label = document.getElementById('last-refresh-label');
+            if (label) {
+                label.textContent = `Precios actualizados ${new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}`;
+            }
         }
 
         // Fusiona posiciones duplicadas del mismo activo que sólo difieren en
@@ -1998,20 +2217,29 @@
         // Registra una compra (manual, vía CEDEAR o vía DCA) en Firestore y refleja
         // el cambio en el array `portfolio` en memoria. `meta` permite taggear la
         // entrada del historial (ej: {dca:true}) sin duplicar esta lógica en 3 lugares.
-        async function recordBuy(ticker, type, shares, price, date, meta = {}) {
+        function recordBuy(ticker, type, shares, price, date, meta = {}) {
+            return recordBuyEntries(ticker, type, [{ date, type: 'buy', shares, price, ...meta }]);
+        }
+
+        // Igual que recordBuy pero con varias compras de una sola vez (un solo
+        // guardado en Firestore). La usa el DCA para registrar cada día pendiente.
+        async function recordBuyEntries(ticker, type, entries) {
+            if (!entries.length) return;
+            const addedShares = entries.reduce((acc, e) => acc + e.shares, 0);
+            const addedCost = entries.reduce((acc, e) => acc + e.shares * e.price, 0);
+
             // Sin distinguir mayúsculas: "BITCOIN" (cargado a mano) y "bitcoin" (plan DCA)
             // son la misma posición, así las compras del DCA se suman a la que ya existía.
-            const tickerKey = String(ticker).toLowerCase();
-            const existingIndex = portfolio.findIndex(item => String(item.ticker || '').toLowerCase() === tickerKey);
+            const tickerKey = getTickerKey(ticker);
+            const existingIndex = portfolio.findIndex(item => getTickerKey(item.ticker) === tickerKey);
 
             if (existingIndex >= 0) {
                 const existing = portfolio[existingIndex];
-                const totalCost = (Number(existing.shares) || 0) * (Number(existing.avgPrice) || 0) + shares * price;
-                const totalShares = (Number(existing.shares) || 0) + shares;
+                const totalCost = (Number(existing.shares) || 0) * (Number(existing.avgPrice) || 0) + addedCost;
+                const totalShares = (Number(existing.shares) || 0) + addedShares;
                 const newAvgPrice = totalShares > 0 ? totalCost / totalShares : 0;
 
-                const newHistoryEntry = { date, type: 'buy', shares, price, ...meta };
-                const updatedHistory = [...(existing.history || []), newHistoryEntry];
+                const updatedHistory = [...(existing.history || []), ...entries];
 
                 await db.collection("inversiones").doc(existing.id).update({
                     shares: totalShares,
@@ -2023,16 +2251,17 @@
                 existing.avgPrice = newAvgPrice;
                 existing.history = updatedHistory;
             } else {
-                const newHistoryEntry = { date, type: 'buy', shares, price, ...meta };
+                const avgPrice = addedShares > 0 ? addedCost / addedShares : 0;
+                const lastPrice = entries[entries.length - 1].price;
                 const docRef = await db.collection("inversiones").add({
                     ticker: ticker,
                     type: type,
-                    shares: shares,
-                    avgPrice: price,
-                    currentPrice: price,
-                    history: [newHistoryEntry]
+                    shares: addedShares,
+                    avgPrice: avgPrice,
+                    currentPrice: lastPrice,
+                    history: entries
                 });
-                portfolio.push({ id: docRef.id, ticker, type, shares, avgPrice: price, currentPrice: price, history: [newHistoryEntry] });
+                portfolio.push({ id: docRef.id, ticker, type, shares: addedShares, avgPrice, currentPrice: lastPrice, history: entries });
             }
         }
 
@@ -2421,10 +2650,130 @@
         // Reemplazá 'TU_API_KEY_AQUI' por la clave gratuita que te da Finnhub.io
         const FINNHUB_KEY = 'dahlkn9r01qvl9bpu4l0dahlkn9r01qvl9bpu4lg';
 
-        async function loadPrices() {
-            const btn = document.getElementById('btn-update');
-            if (btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Actualizando...';
+        // (Opcional) Clave gratuita de twelvedata.com para traer el cierre REAL de
+        // cada día de las acciones (Finnhub gratis no da historial). Sin clave, los
+        // días sin registro de una acción se estiman entre los precios conocidos
+        // (compras/ventas, cierres anteriores guardados al entrar y el precio actual).
+        // Las cripto no la necesitan: su historial sale gratis de CoinGecko.
+        const TWELVEDATA_KEY = '';
 
+        const PRICE_CACHE_PREFIX = 'trackerpro:closes:';
+
+        function readPriceCache(cacheKey) {
+            try {
+                const raw = localStorage.getItem(PRICE_CACHE_PREFIX + cacheKey);
+                const parsed = raw ? JSON.parse(raw) : null;
+                return parsed && parsed.closes ? parsed : null;
+            } catch (error) {
+                return null;
+            }
+        }
+
+        function writePriceCache(cacheKey, value) {
+            try {
+                localStorage.setItem(PRICE_CACHE_PREFIX + cacheKey, JSON.stringify(value));
+            } catch (error) {
+                // Sin localStorage (modo privado, etc.) simplemente no hay caché
+            }
+        }
+
+        // Cierres diarios de una cripto según CoinGecko: para cada día, el último
+        // precio hasta las 00:00 UTC del día siguiente. Gratis, hasta 365 días atrás.
+        async function fetchCoingeckoCloses(coinId, fromKey, toKey) {
+            const days = Math.min(daysBetweenDates(fromKey, getTodayKey()) + 2, 365);
+            const res = await fetch(`https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}/market_chart?vs_currency=usd&days=${days}`);
+            if (!res.ok) return null;
+            const data = await res.json();
+            if (!Array.isArray(data.prices)) return null;
+            const points = data.prices
+                .filter(p => Array.isArray(p) && Number(p[1]) > 0)
+                .sort((a, b) => a[0] - b[0]);
+
+            const closes = {};
+            let i = 0;
+            for (let d = fromKey; d <= toKey; d = addDaysToKey(d, 1)) {
+                const cutoff = Date.parse(addDaysToKey(d, 1) + 'T00:00:00Z') + 15 * 60000;
+                while (i < points.length && points[i][0] <= cutoff) i++;
+                const last = points[i - 1];
+                if (last && last[0] >= cutoff - 36 * 3600000) closes[d] = Number(last[1]);
+            }
+            return closes;
+        }
+
+        // Cierres diarios de una acción según Twelve Data (sólo si hay TWELVEDATA_KEY)
+        async function fetchTwelveDataCloses(symbol, fromKey, toKey) {
+            const res = await fetch(`https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(symbol)}&interval=1day&start_date=${fromKey}&end_date=${addDaysToKey(toKey, 1)}&order=ASC&outputsize=5000&apikey=${TWELVEDATA_KEY}`);
+            if (!res.ok) return null;
+            const data = await res.json();
+            if (!data || data.status === 'error' || !Array.isArray(data.values)) return null;
+            const closes = {};
+            data.values.forEach(v => {
+                const day = String(v.datetime || '').slice(0, 10);
+                const close = parseFloat(v.close);
+                if (day >= fromKey && day <= toKey && close > 0) closes[day] = close;
+            });
+            return closes;
+        }
+
+        // Carga (con caché en el navegador) los cierres diarios de cada activo desde
+        // `startKey` (o desde su primera compra) hasta ayer. Los cierres pasados no
+        // cambian, así que normalmente sólo se pide el día que falta.
+        async function loadHistoricalCloses(startKey) {
+            const yesterdayKey = addDaysToKey(getTodayKey(), -1);
+            if (!startKey || startKey > yesterdayKey) return;
+
+            const seen = new Set();
+            for (const asset of portfolio) {
+                const tickerKey = getTickerKey(asset.ticker);
+                if (seen.has(tickerKey)) continue;
+                seen.add(tickerKey);
+
+                const isCrypto = asset.type === 'crypto';
+                if (!isCrypto && !TWELVEDATA_KEY) continue;
+
+                const firstDay = (asset.history || []).reduce((min, h) => {
+                    const day = utcDayKey(h.date);
+                    return day && (!min || day < min) ? day : min;
+                }, null);
+                let needFrom = firstDay && firstDay > startKey ? firstDay : startKey;
+                // CoinGecko gratis sólo da los últimos 365 días
+                if (isCrypto) {
+                    const limit = addDaysToKey(getTodayKey(), -360);
+                    if (needFrom < limit) needFrom = limit;
+                }
+                if (needFrom > yesterdayKey) continue;
+
+                const cacheKey = (isCrypto ? 'cg:' : 'td:') + (isCrypto ? tickerKey : cleanStockTicker(asset.ticker));
+                const cache = readPriceCache(cacheKey) || { from: null, to: null, closes: {} };
+                const coversStart = cache.from && cache.from <= needFrom;
+
+                if (!(coversStart && cache.to >= yesterdayKey)) {
+                    const fetchFrom = coversStart ? addDaysToKey(cache.to, 1) : needFrom;
+                    try {
+                        const closes = isCrypto
+                            ? await fetchCoingeckoCloses(tickerKey, fetchFrom, yesterdayKey)
+                            : await fetchTwelveDataCloses(cleanStockTicker(asset.ticker), fetchFrom, yesterdayKey);
+                        if (closes) {
+                            Object.assign(cache.closes, closes);
+                            cache.from = coversStart ? cache.from : needFrom;
+                            cache.to = yesterdayKey;
+                            writePriceCache(cacheKey, cache);
+                        }
+                    } catch (error) {
+                        console.error(`No se pudo obtener el historial de precios de ${asset.ticker}:`, error);
+                    }
+                }
+
+                if (cache.from) historicalCloses[tickerKey] = cache;
+            }
+        }
+
+        // Además del precio actual guarda en cada activo la fecha de ese precio
+        // (`priceDate`) y, en acciones, el cierre anterior (`prevClose` /
+        // `prevCloseDate`): son datos reales que después se usan para reconstruir
+        // el valor de los días en que no se abrió la app.
+        async function loadPrices() {
+            const todayKey = getTodayKey();
             const pricePromises = portfolio.map(async (asset) => {
                 try {
                     if (asset.type === 'crypto') {
@@ -2435,6 +2784,7 @@
                         const data = await res.json();
                         if (data[ticker]) {
                             asset.currentPrice = data[ticker].usd;
+                            asset.priceDate = todayKey;
                             if (typeof data[ticker].usd_24h_change === 'number') {
                                 asset.dailyChangePct = data[ticker].usd_24h_change;
                             }
@@ -2450,6 +2800,12 @@
                         // 'c' es la propiedad de Finnhub para el precio actual (Current Price)
                         if (data && data.c && data.c > 0) {
                             asset.currentPrice = data.c;
+                            // 't' = momento de la última cotización (ej: el viernes si hoy es sábado)
+                            asset.priceDate = data.t > 0 ? utcDayKey(data.t * 1000) : todayKey;
+                            if (data.pc > 0) {
+                                asset.prevClose = data.pc;
+                                asset.prevCloseDate = previousWeekdayKey(asset.priceDate);
+                            }
                             // 'dp' es el % de variación vs. el cierre anterior ('pc'); si no viene,
                             // lo calculamos nosotros a partir de 'pc' como respaldo.
                             if (typeof data.dp === 'number') {
@@ -2469,7 +2825,6 @@
             // actualizaban los precios. Con renderTable() solo se refrescan los
             // montos, manteniendo la posición actual de cada fila en la tabla.
             renderTable();
-            if (btn) btn.innerHTML = '<i class="fas fa-sync-alt mr-1"></i> Actualizar';
         }
 
         // Gráfico con porcentajes adaptativos (oculta textos de menos del 8% para no amontonar)
@@ -2531,36 +2886,213 @@
             });
         }
 
-        // Calcula el % y el $ de variación de hoy comparando contra el registro
-        // guardado más reciente anterior al día de hoy (el "último cierre" disponible).
-        function updateDailyChangeCard(totalCurrentValue) {
-            const todayKey = new Date().toISOString().slice(0, 10);
-            // evolutionHistory está ordenado ascendente por fecha: recorriéndolo al
-            // revés, el primero que sea anterior a hoy es el más reciente de todos.
-            const previous = [...evolutionHistory].reverse().find(entry => entry.date < todayKey);
+        // =====================================================================
+        // SERIE DIARIA: un punto por día, desde el primer registro guardado hasta
+        // hoy, aunque no se haya abierto la app todos los días.
+        //  - Inversiones: las unidades de cada día salen del historial de
+        //    compras/ventas, valuadas al cierre de ese día (CoinGecko / Twelve Data;
+        //    si no hay, se estima entre los precios conocidos más cercanos).
+        //  - "Otros" (Cash + Ahorro - Préstamos): sale de los registros guardados;
+        //    entre dos registros se mantiene el capital y el interés se reparte día a día.
+        //  - "Invertido" = aportes netos (compras - ventas + capital de "otros"), así
+        //    la ganancia (valor - invertido) no se mueve por depósitos ni retiros y
+        //    su variación de un día al otro es el rendimiento real de ese día.
+        // =====================================================================
 
+        // Devuelve una función día -> precio de `asset` (para días anteriores a hoy)
+        function buildPriceLookup(asset, pastRecords) {
+            const tickerKey = getTickerKey(asset.ticker);
+            const series = historicalCloses[tickerKey] || null;
+
+            // Precios conocidos sueltos (de menor a mayor prioridad): compras/ventas,
+            // precios guardados en cada registro diario y la cotización actual.
+            const known = {};
+            (asset.history || []).forEach(h => {
+                const day = utcDayKey(h.date);
+                const price = Number(h.price);
+                if (day && price > 0) known[day] = price;
+            });
+            pastRecords.forEach(r => {
+                const quote = r.prices && r.prices[tickerKey];
+                if (!quote) return;
+                if (quote.pcd && Number(quote.pc) > 0) known[quote.pcd] = Number(quote.pc);
+                if (quote.d && Number(quote.p) > 0) known[quote.d] = Number(quote.p);
+            });
+            if (asset.prevCloseDate && asset.prevClose > 0) known[asset.prevCloseDate] = asset.prevClose;
+            const livePrice = Number(asset.currentPrice) || 0;
+            if (livePrice > 0) known[asset.priceDate || getTodayKey()] = livePrice;
+            const knownDays = Object.keys(known).sort();
+
+            return (dayKey) => {
+                // 1) Cierre real de ese día (o el anterior más cercano: fines de semana / feriados)
+                if (series && dayKey >= series.from && dayKey <= series.to) {
+                    for (let k = dayKey, n = 0; n < 7 && k >= series.from; k = addDaysToKey(k, -1), n++) {
+                        if (series.closes[k] > 0) return series.closes[k];
+                    }
+                }
+                // 2) Precio conocido de ese día, o interpolado entre los más cercanos
+                if (known[dayKey] > 0) return known[dayKey];
+                let lo = 0;
+                let hi = knownDays.length - 1;
+                let prevIdx = -1;
+                while (lo <= hi) {
+                    const mid = (lo + hi) >> 1;
+                    if (knownDays[mid] < dayKey) { prevIdx = mid; lo = mid + 1; } else { hi = mid - 1; }
+                }
+                const prevDay = knownDays[prevIdx];
+                const nextDay = knownDays[prevIdx + 1];
+                if (prevDay && nextDay) {
+                    const t = daysBetweenDates(prevDay, dayKey) / daysBetweenDates(prevDay, nextDay);
+                    return known[prevDay] + (known[nextDay] - known[prevDay]) * t;
+                }
+                if (prevDay) return known[prevDay];
+                if (nextDay) return known[nextDay];
+                return 0;
+            };
+        }
+
+        // Devuelve una función día -> {shares, cost, net} al cierre de ese día según
+        // el historial (costo promedio). `net` = compras - ventas (aportes netos).
+        // Hay que llamarla con días en orden ascendente.
+        function buildPositionTimeline(asset) {
+            const entries = (asset.history || [])
+                .filter(h => utcDayKey(h.date))
+                .sort((a, b) => new Date(a.date) - new Date(b.date))
+                .map(h => ({ day: utcDayKey(h.date), sell: h.type === 'sell', shares: Number(h.shares) || 0, price: Number(h.price) || 0 }));
+            const state = { shares: 0, cost: 0, net: 0 };
+            let idx = 0;
+
+            return (dayKey) => {
+                while (idx < entries.length && entries[idx].day <= dayKey) {
+                    const e = entries[idx++];
+                    if (e.sell) {
+                        const ratio = state.shares > 0 ? Math.min(e.shares / state.shares, 1) : 0;
+                        state.cost -= state.cost * ratio;
+                        state.shares -= e.shares;
+                        state.net -= e.shares * e.price;
+                    } else {
+                        state.shares += e.shares;
+                        state.cost += e.shares * e.price;
+                        state.net += e.shares * e.price;
+                    }
+                }
+                return state;
+            };
+        }
+
+        // [{date, totalValue, totalInvested, gain, pnl, pct}] de cada día, ascendente.
+        // pnl/pct = rendimiento de ese día vs. el día anterior (sin depósitos ni retiros).
+        function buildDailySeries() {
+            const todayKey = getTodayKey();
+            const pastRecords = evolutionHistory.filter(r => r.date && r.date < todayKey);
+            const startKey = pastRecords.length ? pastRecords[0].date : todayKey;
+            const days = [];
+            for (let d = startKey; d <= todayKey; d = addDaysToKey(d, 1)) days.push(d);
+            const dayIndex = {};
+            days.forEach((d, i) => { dayIndex[d] = i; });
+
+            // 1) Inversiones día por día (hoy: unidades y precios actuales)
+            const assets = portfolio.map(asset => ({
+                asset,
+                positionAt: buildPositionTimeline(asset),
+                priceAt: buildPriceLookup(asset, pastRecords)
+            }));
+            const invest = days.map(day => {
+                let value = 0;
+                let cost = 0;
+                let net = 0;
+                assets.forEach(a => {
+                    const pos = a.positionAt(day);
+                    cost += pos.cost;
+                    net += pos.net;
+                    if (day === todayKey) value += (Number(a.asset.shares) || 0) * (Number(a.asset.currentPrice) || 0);
+                    else if (pos.shares > 1e-12) value += pos.shares * a.priceAt(day);
+                });
+                return { value, cost, net };
+            });
+
+            // 2) "Otros" (Cash + Ahorro - Préstamos) en cada registro guardado. Los
+            // registros viejos no tienen el desglose: se obtiene restando del total
+            // las inversiones de ese día. Hoy se usa el valor en vivo.
+            const live = computeLiveTotals();
+            const anchors = pastRecords.map(r => {
+                const inv = invest[dayIndex[r.date]];
+                const otherValue = r.otherValue != null ? r.otherValue : r.totalValue - inv.value;
+                const otherInvested = r.otherInvested != null ? r.otherInvested : r.totalInvested - inv.cost;
+                const ts = Date.parse(r.timestamp || '') || Date.parse(r.date + 'T23:59:59Z');
+                return { date: r.date, ts, otherInvested, gain: otherValue - otherInvested };
+            });
+            anchors.push({ date: todayKey, ts: Date.now(), otherInvested: live.otherInvested, gain: live.otherValue - live.otherInvested });
+
+            // Compras de DCA: la cripto cuenta desde su día, pero el Cash recién se
+            // descuenta cuando se ejecutan (al abrir la app). Para los días entre
+            // registros se descuentan acá, así no se cuenta la misma plata dos veces.
+            const dcaBuys = [];
+            portfolio.forEach(asset => (asset.history || []).forEach(h => {
+                if (!h.dca || h.type === 'sell') return;
+                const day = utcDayKey(h.date);
+                const executedAt = Date.parse(h.executedAt || h.date);
+                if (day && !isNaN(executedAt)) {
+                    dcaBuys.push({ day, executedAt, amount: (Number(h.shares) || 0) * (Number(h.price) || 0) });
+                }
+            }));
+
+            let ai = 0;
+            const series = days.map((day, i) => {
+                while (ai + 1 < anchors.length && anchors[ai + 1].date <= day) ai++;
+                const a = anchors[ai];
+                const b = anchors[ai + 1];
+                const otherGain = b
+                    ? a.gain + (b.gain - a.gain) * daysBetweenDates(a.date, day) / daysBetweenDates(a.date, b.date)
+                    : a.gain;
+                let pendingDca = 0;
+                if (day !== todayKey) {
+                    dcaBuys.forEach(buy => {
+                        if (buy.day <= day && buy.executedAt > a.ts) pendingDca += buy.amount;
+                    });
+                }
+                const otherInvested = a.otherInvested - pendingDca;
+                const totalValue = invest[i].value + otherInvested + otherGain;
+                const totalInvested = invest[i].net + otherInvested;
+                return { date: day, totalValue, totalInvested, gain: totalValue - totalInvested };
+            });
+
+            series.forEach((point, i) => {
+                const prev = series[i - 1];
+                point.pnl = prev ? point.gain - prev.gain : null;
+                point.pct = prev && prev.totalValue > 0 ? (point.pnl / prev.totalValue) * 100 : null;
+            });
+            return series;
+        }
+
+        // Tarjeta "Rendimiento Diario": ganancia de hoy vs. el cierre de ayer. Sólo
+        // cuenta lo que rindieron las inversiones (y el interés del Cash): comprar,
+        // vender, depositar o retirar plata no lo mueve.
+        function updateDailyChangeCard() {
             const pctElement = document.getElementById('daily-change-pct');
             const amountElement = document.getElementById('daily-change-amount');
             const refElement = document.getElementById('daily-change-ref');
 
-            if (!previous || !(previous.totalValue > 0)) {
+            const series = pricesReady ? buildDailySeries() : [];
+            const today = series[series.length - 1];
+
+            if (!today || today.pnl == null) {
                 pctElement.textContent = '—';
                 pctElement.className = 'text-3xl md:text-4xl font-bold mt-2 text-gray-400';
                 amountElement.textContent = '';
-                refElement.textContent = 'Todavía no hay un registro previo para comparar';
+                refElement.textContent = pricesReady ? 'Todavía no hay un día previo para comparar' : 'Cargando...';
                 return;
             }
 
-            const change = totalCurrentValue - previous.totalValue;
-            const pct = (change / previous.totalValue) * 100;
+            const change = today.pnl;
             const sign = change >= 0 ? '+' : '';
             const colorClass = change >= 0 ? 'text-green-500' : 'text-red-500';
 
-            pctElement.textContent = `${sign}${pct.toFixed(2)}%`;
+            pctElement.textContent = today.pct != null ? `${sign}${today.pct.toFixed(2)}%` : '—';
             pctElement.className = `text-3xl md:text-4xl font-bold mt-2 ${colorClass}`;
             amountElement.textContent = `${sign}${formatMoney(change)}`;
-            const prevDateLabel = new Date(previous.date + 'T00:00:00').toLocaleDateString('es-AR');
-            refElement.textContent = `Desde el último registro (${prevDateLabel})`;
+            const prevDateLabel = new Date(series[series.length - 2].date + 'T00:00:00').toLocaleDateString('es-AR');
+            refElement.textContent = `Vs. cierre del ${prevDateLabel} · sin depósitos ni retiros`;
         }
 
         // Fecha de inicio (YYYY-MM-DD) para cada rango predefinido del gráfico de evolución
@@ -2577,15 +3109,15 @@
             return start.toISOString().slice(0, 10);
         }
 
-        function getFilteredEvolutionData() {
+        function getFilteredEvolutionData(series) {
             if (evolutionRange === 'CUSTOM') {
                 if (!evolutionCustomStart || !evolutionCustomEnd) return [];
-                return evolutionHistory.filter(e => e.date >= evolutionCustomStart && e.date <= evolutionCustomEnd);
+                return series.filter(e => e.date >= evolutionCustomStart && e.date <= evolutionCustomEnd);
             }
-            if (evolutionRange === 'MAX') return evolutionHistory;
+            if (evolutionRange === 'MAX') return series;
 
             const startKey = getRangeStartDate(evolutionRange);
-            return startKey ? evolutionHistory.filter(e => e.date >= startKey) : evolutionHistory;
+            return startKey ? series.filter(e => e.date >= startKey) : series;
         }
 
         function formatEvolutionLabel(dateKey) {
@@ -2593,24 +3125,26 @@
             return d.toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: '2-digit' });
         }
 
-        // Gráfico de línea con 2 modos: "Patrimonio" (valor total, salta con los
-        // depósitos/compras) y "Ganancias" (valor - invertido, no se mueve por
-        // depósitos, sólo refleja la ganancia/pérdida real del portfolio).
+        // Gráfico con 3 modos: "Patrimonio" (valor total, salta con los
+        // depósitos/compras), "Ganancias" (valor - aportes netos, no se mueve por
+        // depósitos) y "Diario" (barras con el rendimiento de cada día).
         function renderEvolutionChart() {
-            const data = getFilteredEvolutionData();
+            const series = pricesReady ? buildDailySeries() : [];
+            const data = getFilteredEvolutionData(series);
+            const isDaily = evolutionMode === 'diario';
 
             document.getElementById('evolution-count').textContent =
-                `${evolutionHistory.length} registro${evolutionHistory.length === 1 ? '' : 's'}`;
+                `${series.length} día${series.length === 1 ? '' : 's'}`;
 
-            document.getElementById('evolution-empty-msg').textContent = data.length === 0
-                ? 'Todavía no hay registros para graficar en este período.'
-                : '';
+            document.getElementById('evolution-empty-msg').textContent = !pricesReady
+                ? 'Cargando...'
+                : (data.length === 0 ? 'Todavía no hay datos para graficar en este período.' : '');
 
             const labels = data.map(e => formatEvolutionLabel(e.date));
-            const values = data.map(e => evolutionMode === 'ganancias'
-                ? (e.totalValue - e.totalInvested)
-                : e.totalValue
-            );
+            const values = data.map(e => {
+                if (isDaily) return e.pnl;
+                return evolutionMode === 'ganancias' ? e.gain : e.totalValue;
+            });
 
             const canvas = document.getElementById('evolutionChart');
             const ctx = canvas.getContext('2d');
@@ -2620,32 +3154,46 @@
                 myEvolutionChart = null;
             }
 
+            const dataset = isDaily
+                ? {
+                    data: values,
+                    backgroundColor: values.map(v => (v || 0) >= 0 ? 'rgba(16, 185, 129, 0.8)' : 'rgba(239, 68, 68, 0.8)'),
+                    borderRadius: 2
+                }
+                : {
+                    data: values,
+                    borderColor: '#10B981',
+                    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                    pointBackgroundColor: '#10B981',
+                    pointRadius: data.length > 60 ? 0 : 3,
+                    pointHoverRadius: 5,
+                    pointHitRadius: 8,
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.25
+                };
+
             myEvolutionChart = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        data: values,
-                        borderColor: '#10B981',
-                        backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                        pointBackgroundColor: '#10B981',
-                        pointRadius: 4,
-                        pointHoverRadius: 5,
-                        borderWidth: 2,
-                        fill: true,
-                        tension: 0.35
-                    }]
-                },
+                type: isDaily ? 'bar' : 'line',
+                data: { labels: labels, datasets: [dataset] },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
                     animation: false,
+                    interaction: { mode: 'index', intersect: false },
                     plugins: {
                         legend: { display: false },
                         datalabels: { display: false },
                         tooltip: {
                             callbacks: {
-                                label: (context) => ' ' + formatMoney(context.parsed.y)
+                                label: (context) => {
+                                    const value = context.parsed.y;
+                                    if (!isDaily) return ' ' + formatMoney(value);
+                                    const point = data[context.dataIndex];
+                                    const sign = value >= 0 ? '+' : '';
+                                    const pct = point && point.pct != null ? ` (${sign}${point.pct.toFixed(2)}%)` : '';
+                                    return ` ${sign}${formatMoney(value)}${pct}`;
+                                }
                             }
                         }
                     },
@@ -2669,10 +3217,10 @@
         function updateEvolutionModeButtons() {
             const activeClass = 'bg-green-600 text-white';
             const inactiveClass = 'text-gray-400 hover:text-white';
-            document.getElementById('btn-mode-total').className =
-                `px-3 py-1.5 rounded-md transition ${evolutionMode === 'total' ? activeClass : inactiveClass}`;
-            document.getElementById('btn-mode-ganancias').className =
-                `px-3 py-1.5 rounded-md transition ${evolutionMode === 'ganancias' ? activeClass : inactiveClass}`;
+            ['total', 'ganancias', 'diario'].forEach(mode => {
+                document.getElementById(`btn-mode-${mode}`).className =
+                    `px-3 py-1.5 rounded-md transition ${evolutionMode === mode ? activeClass : inactiveClass}`;
+            });
         }
 
         function setEvolutionMode(mode) {
@@ -2809,8 +3357,8 @@
                 ? `Cotización actualizada: ${new Date(cclUpdatedAt).toLocaleString('es-AR')}`
                 : '';
 
-            // Tarjeta "Rendimiento Diario": % y $ vs. el último registro guardado (incluye Cash)
-            updateDailyChangeCard(patrimonioValue);
+            // Tarjeta "Rendimiento Diario": % y $ de hoy vs. el cierre de ayer (sin depósitos ni retiros)
+            updateDailyChangeCard();
 
             // El gráfico se arma SIEMPRE a partir de una copia del portfolio ordenada
             // alfabéticamente por ticker (no del orden actual de la tabla), para que
