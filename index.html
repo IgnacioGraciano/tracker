@@ -22,9 +22,15 @@
     <nav class="bg-gray-800 p-4 shadow-lg border-b border-gray-700 sticky top-0 z-50">
         <div class="container mx-auto flex justify-between items-center">
             <h1 class="text-xl md:text-2xl font-bold text-blue-400"><i class="fas fa-chart-pie mr-2"></i>TrackerPro</h1>
+            <div class="flex items-center gap-2">
+            <!-- Ocultar / mostrar saldos (se recuerda en este dispositivo) -->
+            <button type="button" onclick="toggleBalancesHidden()" id="btn-privacy" class="text-gray-300 hover:text-white bg-gray-700 hover:bg-gray-600 w-9 h-9 rounded transition" title="Ocultar saldos" aria-label="Ocultar saldos">
+                <i class="fas fa-eye"></i>
+            </button>
             <button onclick="toggleModal('add-modal')" class="bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded font-semibold text-sm transition shadow-lg">
                 <i class="fas fa-plus md:mr-1"></i> <span class="hidden md:inline">Transacción</span>
             </button>
+            </div>
         </div>
     </nav>
 
@@ -813,6 +819,17 @@
         // --- Navegación por páginas ---
         let currentPage = 'dashboard';
 
+        // --- Modo privacidad: ocultar saldos (botón del ojo). Se recuerda en este
+        // dispositivo; todos los montos pasan por formatMoney/formatARS/formatUnits.
+        const HIDDEN_MASK = '•••••';
+        const BALANCES_HIDDEN_KEY = 'trackerpro:balancesHidden';
+        let balancesHidden = false;
+        try {
+            balancesHidden = localStorage.getItem(BALANCES_HIDDEN_KEY) === '1';
+        } catch (error) {
+            balancesHidden = false;
+        }
+
         // --- Cash (USDT/USDC) y Cripto DCA ---
         let cashHoldings = [];  // [{id, amount, currency, platform, annualRate, lastUpdated}]
         let dcaPlans = [];      // [{id, ticker, monthlyAmount, cashHoldingId, active, lastExecuted, totalInvested, createdAt}]
@@ -899,11 +916,20 @@
         }
 
         function formatMoney(amount) {
+            if (balancesHidden) return `$${HIDDEN_MASK}`;
             return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+        }
+
+        // Cantidad de unidades de un activo (también se oculta con el botón del ojo)
+        function formatUnits(value, decimals = null) {
+            if (balancesHidden) return HIDDEN_MASK;
+            const n = Number(value) || 0;
+            return decimals == null ? String(n) : n.toFixed(decimals);
         }
 
         // Formatea un monto en pesos argentinos con separador de miles con punto (ej: "ARS 2.585.420")
         function formatARS(amount) {
+            if (balancesHidden) return `ARS ${HIDDEN_MASK}`;
             const formatted = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 0 }).format(Math.round(amount));
             return `ARS ${formatted}`;
         }
@@ -2417,12 +2443,13 @@
             if (row) row.classList.toggle('hidden');
         }
 
-        function openDetails(index) {
+        // Con `keepOpen` sólo vuelve a dibujar el detalle (sin abrir/cerrar el modal)
+        function openDetails(index, keepOpen = false) {
             activeAssetIndex = index;
             const asset = portfolio[index];
             
             document.getElementById('detail-ticker').textContent = asset.ticker;
-            document.getElementById('detail-shares').textContent = asset.shares;
+            document.getElementById('detail-shares').textContent = formatUnits(asset.shares);
             document.getElementById('detail-avg-price').textContent = formatMoney(Number(asset.avgPrice) || 0);
             
             // Ordenamos el historial cronológicamente (relevante ahora que la fecha se puede editar)
@@ -2447,7 +2474,7 @@
                         <tr class="hover:bg-gray-800">
                             <td class="p-3 text-gray-400">${dateStr}</td>
                             <td class="p-3 font-semibold ${typeClass}">${typeLabel}</td>
-                            <td class="p-3 text-right">${sign}${entry.shares}</td>
+                            <td class="p-3 text-right">${sign}${formatUnits(entry.shares)}</td>
                             <td class="p-3 text-right">${formatMoney(entry.price)}</td>
                             <td class="p-3 text-right font-bold">${formatMoney(entry.shares * entry.price)}</td>
                             <td class="p-3 text-center">
@@ -2470,7 +2497,7 @@
                                     <span>DCA · ${monthLabel} <span class="text-gray-500">(${row.count} compras)</span></span>
                                 </button>
                             </td>
-                            <td class="p-3 text-right">+${row.totalShares.toFixed(6)}</td>
+                            <td class="p-3 text-right">+${formatUnits(row.totalShares, 6)}</td>
                             <td class="p-3 text-right">${formatMoney(row.avgPrice)}<span class="text-[10px] text-gray-500 block">prom.</span></td>
                             <td class="p-3 text-right font-bold">${formatMoney(totalCost)}</td>
                             <td class="p-3 text-center text-gray-600">—</td>
@@ -2478,7 +2505,7 @@
                         <tr id="dca-detail-${row.monthKey}" class="hidden bg-gray-900/60">
                             <td colspan="6" class="p-3">
                                 <div class="max-h-40 overflow-y-auto text-xs space-y-1">
-                                    ${row.entries.map(e => `<div class="flex justify-between text-gray-400"><span>${new Date(e.date).toLocaleDateString()}</span><span>+${Number(e.shares).toFixed(6)} @ ${formatMoney(e.price)}</span></div>`).join('')}
+                                    ${row.entries.map(e => `<div class="flex justify-between text-gray-400"><span>${new Date(e.date).toLocaleDateString()}</span><span>+${formatUnits(e.shares, 6)} @ ${formatMoney(e.price)}</span></div>`).join('')}
                                 </div>
                             </td>
                         </tr>
@@ -2486,6 +2513,7 @@
                 }
             });
 
+            if (keepOpen) return;
             document.getElementById('sell-form').reset();
             toggleModal('details-modal');
         }
@@ -3286,7 +3314,7 @@
                         <td class="p-4">
                             <div class="flex items-center gap-2">
                                 <span class="font-bold text-blue-400">${asset.ticker}</span>
-                                <span class="bg-gray-800/90 text-gray-300 text-xs px-2 py-0.5 rounded-md border border-gray-700/60 font-mono inline-flex items-center">${shares.toFixed(2)} u.</span>
+                                <span class="bg-gray-800/90 text-gray-300 text-xs px-2 py-0.5 rounded-md border border-gray-700/60 font-mono inline-flex items-center">${formatUnits(shares, 2)} u.</span>
                             </div>
                             <div class="text-[10px] text-gray-500 uppercase">${asset.type}</div>
                         </td>
@@ -3387,6 +3415,37 @@
             updateChart(chartLabels, chartData, chartColors);
         }
 
+        function updatePrivacyButton() {
+            const btn = document.getElementById('btn-privacy');
+            if (!btn) return;
+            const label = balancesHidden ? 'Mostrar saldos' : 'Ocultar saldos';
+            btn.innerHTML = `<i class="fas ${balancesHidden ? 'fa-eye-slash' : 'fa-eye'}"></i>`;
+            btn.title = label;
+            btn.setAttribute('aria-label', label);
+        }
+
+        // Botón del ojo: oculta (o vuelve a mostrar) todos los montos y cantidades
+        // y vuelve a dibujar lo que está en pantalla.
+        function toggleBalancesHidden() {
+            balancesHidden = !balancesHidden;
+            try {
+                localStorage.setItem(BALANCES_HIDDEN_KEY, balancesHidden ? '1' : '0');
+            } catch (error) {
+                // Sin localStorage sólo dura hasta recargar la página
+            }
+            updatePrivacyButton();
+            renderTable();
+            renderCashList();
+            renderDcaList();
+            renderGoalsList();
+            renderLoansList();
+            renderEvolutionChart();
+            if (activeAssetIndex != null && portfolio[activeAssetIndex]
+                && !document.getElementById('details-modal').classList.contains('hidden')) {
+                openDetails(activeAssetIndex, true);
+            }
+        }
+
         // Si Firestore rechaza una escritura (o falla cualquier guardado), avisamos
         // en vez de dejar el modal abierto sin explicación.
         window.addEventListener('unhandledrejection', event => {
@@ -3400,6 +3459,7 @@
         });
 
         document.addEventListener('DOMContentLoaded', () => {
+            updatePrivacyButton();
             showPage('dashboard');
             setTxMode('usd');
             updateEvolutionModeButtons();
