@@ -2104,11 +2104,15 @@
             snapshot.forEach(doc => {
                 let data = doc.data();
                 if (!data.history) {
+                    // Posición cargada sin historial: se muestra una compra "de
+                    // referencia" (synthetic) para poder verla y editarla. No es una
+                    // compra real, así que la serie diaria la ignora (ver buildPositionTimeline).
                     data.history = [{
                         date: new Date().toISOString(),
                         type: 'buy',
                         shares: data.shares,
-                        price: data.avgPrice
+                        price: data.avgPrice,
+                        synthetic: true
                     }];
                 }
                 portfolio.push({ id: doc.id, ...data });
@@ -2540,6 +2544,8 @@
             const asset = portfolio[activeAssetIndex];
             asset.history[entryIndex].shares = newShares;
             asset.history[entryIndex].price = newPrice;
+            // Al editarla a mano pasa a ser una compra real (con su fecha y precio)
+            delete asset.history[entryIndex].synthetic;
             if (newDateValue) {
                 asset.history[entryIndex].date = datetimeLocalToIso(newDateValue);
             }
@@ -2936,6 +2942,7 @@
             // precios guardados en cada registro diario y la cotización actual.
             const known = {};
             (asset.history || []).forEach(h => {
+                if (h.synthetic) return; // precio promedio, no un precio de mercado de ese día
                 const day = utcDayKey(h.date);
                 const price = Number(h.price);
                 if (day && price > 0) known[day] = price;
@@ -2950,8 +2957,15 @@
             const livePrice = Number(asset.currentPrice) || 0;
             if (livePrice > 0) known[asset.priceDate || getTodayKey()] = livePrice;
             const knownDays = Object.keys(known).sort();
+            const isCrypto = asset.type === 'crypto';
 
             return (dayKey) => {
+                // Las acciones no cotizan los fines de semana: sábado y domingo valen
+                // lo mismo que el viernes (si no, la suba/baja del lunes se repartía
+                // entre sábado, domingo y lunes).
+                if (!isCrypto) {
+                    while ([0, 6].includes(new Date(dayKey + 'T00:00:00Z').getUTCDay())) dayKey = addDaysToKey(dayKey, -1);
+                }
                 // 1) Cierre real de ese día (o el anterior más cercano: fines de semana / feriados)
                 if (series && dayKey >= series.from && dayKey <= series.to) {
                     for (let k = dayKey, n = 0; n < 7 && k >= series.from; k = addDaysToKey(k, -1), n++) {
@@ -2984,9 +2998,19 @@
         // Hay que llamarla con días en orden ascendente.
         function buildPositionTimeline(asset) {
             const entries = (asset.history || [])
-                .filter(h => utcDayKey(h.date))
+                .filter(h => !h.synthetic && utcDayKey(h.date))
                 .sort((a, b) => new Date(a.date) - new Date(b.date))
                 .map(h => ({ day: utcDayKey(h.date), sell: h.type === 'sell', shares: Number(h.shares) || 0, price: Number(h.price) || 0 }));
+
+            // Si el historial no explica todas las unidades actuales (posiciones
+            // cargadas sin historial, o con historial incompleto), la diferencia se
+            // toma como si estuviera desde el principio, a su precio promedio. Así
+            // no aparece como "ganancia del día" la ganancia acumulada de esas unidades.
+            const historyShares = entries.reduce((acc, e) => acc + (e.sell ? -e.shares : e.shares), 0);
+            const missingShares = (Number(asset.shares) || 0) - historyShares;
+            if (Math.abs(missingShares) > 1e-9) {
+                entries.unshift({ day: '0000-01-01', sell: missingShares < 0, shares: Math.abs(missingShares), price: Number(asset.avgPrice) || 0 });
+            }
             const state = { shares: 0, cost: 0, net: 0 };
             let idx = 0;
 
