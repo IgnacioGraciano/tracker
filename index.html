@@ -1022,6 +1022,10 @@
             return key;
         }
 
+        // Fecha de las compras "de referencia" sin fecha conocida (ver fetchPortfolio):
+        // va al principio del historial y se muestra como "Fecha desconocida".
+        const UNKNOWN_DATE_ISO = '1970-01-01T00:00:00.000Z';
+
         // Clave para unificar un activo sin importar mayúsculas ("BITCOIN" = "bitcoin")
         function getTickerKey(ticker) {
             return String(ticker || '').toLowerCase();
@@ -2105,16 +2109,22 @@
                 let data = doc.data();
                 if (!data.history) {
                     // Posición cargada sin historial: se muestra una compra "de
-                    // referencia" (synthetic) para poder verla y editarla. No es una
-                    // compra real, así que la serie diaria la ignora (ver buildPositionTimeline).
+                    // referencia" (synthetic) con fecha desconocida, para poder verla y
+                    // editarla. No es una compra real, así que la serie diaria la ignora
+                    // (ver buildPositionTimeline). Ojo: NO se le pone la fecha de hoy,
+                    // porque al registrar otra compra se guarda todo el historial y
+                    // quedaba guardada como si se hubiera comprado ese día.
                     data.history = [{
-                        date: new Date().toISOString(),
+                        date: UNKNOWN_DATE_ISO,
                         type: 'buy',
                         shares: data.shares,
                         price: data.avgPrice,
                         synthetic: true
                     }];
                 }
+                data.history.forEach(h => {
+                    if (h.synthetic) h.date = UNKNOWN_DATE_ISO;
+                });
                 portfolio.push({ id: doc.id, ...data });
             });
             
@@ -2472,7 +2482,9 @@
                     const typeLabel = isBuy ? 'Compra' : 'Venta';
                     const sign = isBuy ? '+' : '-';
                     const dateObj = new Date(entry.date);
-                    const dateStr = dateObj.toLocaleDateString() + ' ' + dateObj.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                    const dateStr = entry.synthetic
+                        ? 'Fecha desconocida'
+                        : dateObj.toLocaleDateString() + ' ' + dateObj.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
 
                     tbody.innerHTML += `
                         <tr class="hover:bg-gray-800">
@@ -2529,7 +2541,7 @@
             document.getElementById('edit-entry-index').value = entryIndex;
             document.getElementById('edit-entry-shares').value = entry.shares;
             document.getElementById('edit-entry-price').value = entry.price;
-            document.getElementById('edit-entry-date').value = isoToDatetimeLocal(entry.date);
+            document.getElementById('edit-entry-date').value = entry.synthetic ? '' : isoToDatetimeLocal(entry.date);
             
             toggleModal('edit-entry-modal');
         }
@@ -2544,10 +2556,10 @@
             const asset = portfolio[activeAssetIndex];
             asset.history[entryIndex].shares = newShares;
             asset.history[entryIndex].price = newPrice;
-            // Al editarla a mano pasa a ser una compra real (con su fecha y precio)
-            delete asset.history[entryIndex].synthetic;
             if (newDateValue) {
                 asset.history[entryIndex].date = datetimeLocalToIso(newDateValue);
+                // Con una fecha cargada a mano pasa a ser una compra real
+                delete asset.history[entryIndex].synthetic;
             }
 
             // Reordenamos por si la nueva fecha cambió la posición cronológica del asiento
