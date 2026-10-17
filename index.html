@@ -77,9 +77,11 @@
                         <!-- Gráfico de Diversificación -->
                         <div class="bg-gray-800 p-4 rounded-xl shadow-md border border-gray-700 flex flex-col items-center justify-center">
                             <h3 class="text-gray-400 text-sm font-semibold uppercase mb-4 w-full text-left">Diversificación</h3>
-                            <div class="relative w-56 h-56">
+                            <div class="relative w-48 h-48">
                                 <canvas id="portfolioChart"></canvas>
                             </div>
+                            <!-- Referencias: todos los activos con su %, aunque su porción sea chica -->
+                            <ul id="diversification-legend" class="w-full mt-4 grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs"></ul>
                         </div>
                     </div>
 
@@ -114,7 +116,7 @@
                             <canvas id="evolutionChart"></canvas>
                         </div>
                         <p class="text-[11px] text-gray-500 mt-3 text-center" id="evolution-empty-msg"></p>
-                        <p class="text-[11px] text-gray-600 mt-1 text-center">Un punto por día: los días en que no entraste se reconstruyen con tus movimientos y los precios históricos. Las ganancias y el rendimiento diario no cuentan depósitos ni retiros.</p>
+                        <p class="text-[11px] text-gray-600 mt-1 text-center">Un punto por día: los días en que no entraste se reconstruyen con tus movimientos y los precios históricos. Las ganancias y el rendimiento diario no cuentan depósitos ni retiros: son lo que rindieron tus inversiones (igual que "Rendimiento → Total" en Inversiones), más los intereses del Cash y menos los intereses de los préstamos.</p>
                     </div>
                 </div>
 
@@ -127,9 +129,19 @@
                             <p class="text-xs text-gray-500 mt-3" id="inv-invertido-ref">Invertido: $0.00</p>
                         </div>
                         <div class="bg-gray-800 p-6 rounded-xl shadow-md border border-gray-700">
-                            <h3 class="text-gray-400 text-xs font-semibold uppercase tracking-wider">Rendimiento Total</h3>
+                            <div class="flex flex-wrap items-center justify-between gap-2">
+                                <h3 class="text-gray-400 text-xs font-semibold uppercase tracking-wider">Rendimiento</h3>
+                                <div class="flex bg-gray-900 rounded-lg p-0.5 text-[11px] font-semibold">
+                                    <button type="button" onclick="setPerfRange('1S')" id="btn-perf-1S" class="perf-btn px-2 py-1 rounded-md transition">1S</button>
+                                    <button type="button" onclick="setPerfRange('1M')" id="btn-perf-1M" class="perf-btn px-2 py-1 rounded-md transition">1M</button>
+                                    <button type="button" onclick="setPerfRange('1A')" id="btn-perf-1A" class="perf-btn px-2 py-1 rounded-md transition">1A</button>
+                                    <button type="button" onclick="setPerfRange('YTD')" id="btn-perf-YTD" class="perf-btn px-2 py-1 rounded-md transition">YTD</button>
+                                    <button type="button" onclick="setPerfRange('TOTAL')" id="btn-perf-TOTAL" class="perf-btn px-2 py-1 rounded-md transition">Total</button>
+                                </div>
+                            </div>
                             <p class="text-3xl md:text-4xl font-bold mt-2" id="inv-rendimiento-pct">0.00%</p>
-                            <p class="text-xs text-gray-500 mt-3" id="inv-rendimiento-monto">$0.00</p>
+                            <p class="text-sm text-gray-400 mt-1" id="inv-rendimiento-monto">$0.00</p>
+                            <p class="text-xs text-gray-500 mt-3" id="inv-rendimiento-detalle"></p>
                         </div>
                     </div>
 
@@ -613,7 +625,12 @@
                 <div class="mb-4">
                     <label class="block text-sm text-gray-400 mb-1">Saldo pendiente (opcional)</label>
                     <input type="number" step="any" min="0" id="loan-balance" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
-                    <p class="text-[11px] text-gray-500 mt-1">Si lo dejás vacío, se toma el monto completo del préstamo. Incluí acá los intereses si corresponde.</p>
+                    <p class="text-[11px] text-gray-500 mt-1">Si lo dejás vacío, se toma el monto completo del préstamo.</p>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-sm text-gray-400 mb-1">Interés anual % (opcional)</label>
+                    <input type="number" step="any" min="0" id="loan-rate" placeholder="0" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
+                    <p class="text-[11px] text-gray-500 mt-1">El saldo pendiente va sumando este interés todos los días.</p>
                 </div>
                 <div class="mb-6">
                     <label class="block text-sm text-gray-400 mb-1">Vencimiento (opcional)</label>
@@ -722,11 +739,16 @@
                 </div>
                 <div class="mb-4">
                     <label class="block text-xs text-gray-400 mb-1">Fecha</label>
-                    <input type="datetime-local" id="edit-entry-date" onclick="this.showPicker?.()" required class="w-full bg-gray-900 text-white p-2 rounded border border-gray-600 cursor-pointer">
+                    <input type="datetime-local" id="edit-entry-date" onclick="this.showPicker?.()" class="w-full bg-gray-900 text-white p-2 rounded border border-gray-600 cursor-pointer">
                 </div>
-                <div class="flex justify-end gap-2">
-                    <button type="button" onclick="toggleModal('edit-entry-modal')" class="px-4 py-2 bg-gray-700 rounded">Cancelar</button>
-                    <button type="submit" class="px-4 py-2 bg-blue-600 rounded font-bold">Guardar Cambios</button>
+                <div class="flex justify-between gap-2">
+                    <button type="button" onclick="deleteHistoryEntry()" class="px-3 py-2 text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded text-sm font-semibold transition">
+                        <i class="fas fa-trash-alt mr-1"></i> Borrar
+                    </button>
+                    <div class="flex gap-2">
+                        <button type="button" onclick="toggleModal('edit-entry-modal')" class="px-4 py-2 bg-gray-700 rounded">Cancelar</button>
+                        <button type="submit" class="px-4 py-2 bg-blue-600 rounded font-bold">Guardar Cambios</button>
+                    </div>
                 </div>
             </form>
         </div>
@@ -841,27 +863,12 @@
         let goalsLoadError = false;
         let loansLoadError = false;
 
-        // Paleta de colores + función determinista ticker -> color.
-        // A diferencia de un mapa "por orden de aparición", esto se calcula a partir
-        // del propio texto del ticker (hash), así que da siempre el mismo resultado
-        // sin importar en qué orden se cargó, ordenó o mostró cada activo.
-        const colorPalette = [
-            '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6',
-            '#EC4899', '#14B8A6', '#F97316', '#6366F1', '#84CC16',
-            '#06B6D4', '#D946EF', '#EAB308', '#F43F5E', '#22C55E',
-            '#0EA5E9', '#A855F7', '#FB923C', '#2DD4BF', '#E879F9'
-        ];
-
-        function getTickerColor(ticker) {
-            const str = String(ticker || '').toUpperCase();
-            let hash = 0;
-            for (let i = 0; i < str.length; i++) {
-                // Hash simple y determinista (mismo string -> mismo número siempre)
-                hash = (hash * 31 + str.charCodeAt(i)) | 0;
-            }
-            const index = Math.abs(hash) % colorPalette.length;
-            return colorPalette[index];
-        }
+        // Colores del gráfico de Diversificación: 8 tonos bien distintos entre sí
+        // (validados para fondo oscuro y para daltonismo), asignados en orden fijo
+        // por ticker alfabético, así nunca se repite un color en el gráfico. Si hay
+        // más de 8 activos, los más chicos se agrupan en "Otros" (gris).
+        const CHART_COLORS = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'];
+        const OTHERS_COLOR = '#6B7280';
 
         function toggleModal(id) {
             document.getElementById(id).classList.toggle('hidden');
@@ -1356,7 +1363,7 @@
             const savingsValue = getSavingsTotalUSD();
             const debtValue = getDebtTotalUSD();
             const otherValue = cashValue + savingsValue - debtValue;
-            const otherInvested = cashPrincipal + savingsValue - debtValue;
+            const otherInvested = cashPrincipal + savingsValue - getDebtPrincipalUSD();
             return {
                 investValue,
                 investCost,
@@ -1877,7 +1884,12 @@
                         lender: d.lender || '',
                         currency: d.currency === 'ARS' ? 'ARS' : 'USD',
                         original: Number(d.original) || 0,
+                        // Saldo al día `lastUpdated`; desde ahí corre el interés (ver getCurrentLoanBalance)
                         balance: Number(d.balance) || 0,
+                        annualRate: Number(d.annualRate) || 0,
+                        lastUpdated: d.lastUpdated || getTodayKey(),
+                        // Capital adeudado sin intereses. Los préstamos viejos no lo tienen: se toma el saldo.
+                        principal: d.principal != null ? (Number(d.principal) || 0) : (Number(d.balance) || 0),
                         dueDate: d.dueDate || '',
                         createdAt: d.createdAt || new Date().toISOString().slice(0, 10),
                         payments: Array.isArray(d.payments) ? d.payments : []
@@ -1892,8 +1904,22 @@
             }
         }
 
+        // Saldo de un préstamo a la fecha `todayKey`, con interés compuesto diario
+        // desde su último movimiento (igual que el Cash, pero sumando deuda).
+        function getCurrentLoanBalance(loan, todayKey = getTodayKey()) {
+            const days = Math.max(daysBetweenDates(loan.lastUpdated, todayKey), 0);
+            const dailyRate = (Number(loan.annualRate) || 0) / 100 / 365;
+            return (Number(loan.balance) || 0) * Math.pow(1 + dailyRate, days);
+        }
+
         function getDebtTotalUSD() {
-            return loans.reduce((acc, l) => acc + toUSD(l.balance, l.currency), 0);
+            return loans.reduce((acc, l) => acc + toUSD(getCurrentLoanBalance(l), l.currency), 0);
+        }
+
+        // Capital adeudado (sin intereses). Se usa como lo "invertido" de la deuda, así
+        // el interés que se va sumando cuenta como pérdida, y tomar o pagar la deuda no.
+        function getDebtPrincipalUSD() {
+            return loans.reduce((acc, l) => acc + toUSD(l.principal, l.currency), 0);
         }
 
         function renderLoansList() {
@@ -1907,11 +1933,16 @@
                 : (loans.length === 0 ? 'No tenés ningún préstamo registrado.' : '');
 
             loans.forEach(loan => {
-                const paid = Math.max(loan.original - loan.balance, 0);
+                const balance = getCurrentLoanBalance(loan);
+                const paid = Math.max(loan.original - balance, 0);
                 const pct = loan.original > 0 ? (paid / loan.original) * 100 : 0;
-                const settled = loan.balance <= 0.005;
+                const settled = balance <= 0.005;
                 const usdNote = loan.currency === 'ARS'
-                    ? (cclRate ? ` · ≈ ${formatMoney(toUSD(loan.balance, 'ARS'))}` : ' · sin cotización CCL')
+                    ? (cclRate ? ` · ≈ ${formatMoney(toUSD(balance, 'ARS'))}` : ' · sin cotización CCL')
+                    : '';
+                const accrued = balance - loan.principal;
+                const rateNote = loan.annualRate > 0
+                    ? `<p class="text-xs text-gray-500 mt-1">Interés: ${loan.annualRate}% anual${accrued > 0.005 && !settled ? ` · ${formatByCurrency(accrued, loan.currency)} de intereses sin pagar` : ''}</p>`
                     : '';
                 const dueLabel = loan.dueDate
                     ? ` · vence ${new Date(loan.dueDate + 'T00:00:00').toLocaleDateString('es-AR')}`
@@ -1933,11 +1964,12 @@
                                 </button>
                             </div>
                         </div>
-                        <p class="text-xl font-bold ${settled ? 'text-green-400' : 'text-red-400'}">${settled ? 'Saldado' : formatByCurrency(loan.balance, loan.currency)} <span class="text-sm font-normal text-gray-500">${settled ? '' : 'pendiente'}</span></p>
+                        <p class="text-xl font-bold ${settled ? 'text-green-400' : 'text-red-400'}">${settled ? 'Saldado' : formatByCurrency(balance, loan.currency)} <span class="text-sm font-normal text-gray-500">${settled ? '' : 'pendiente'}</span></p>
                         <div class="w-full bg-gray-700 rounded-full h-2 mt-2 overflow-hidden">
                             <div class="bg-green-500 h-2 rounded-full" style="width:${Math.min(Math.max(pct, 0), 100).toFixed(1)}%"></div>
                         </div>
                         <p class="text-xs text-gray-500 mt-1">Pagado ${formatByCurrency(paid, loan.currency)} de ${formatByCurrency(loan.original, loan.currency)} (${pct.toFixed(1)}%)${settled ? '' : usdNote}</p>
+                        ${rateNote}
                         ${settled ? '' : `
                         <div class="flex gap-2 mt-3">
                             <button onclick="openLoanPayModal('${loan.id}')" class="flex-1 bg-gray-700 hover:bg-gray-600 text-xs font-semibold py-1.5 rounded transition">
@@ -1958,7 +1990,11 @@
             document.getElementById('loan-lender').value = loan ? loan.lender : '';
             document.getElementById('loan-currency').value = loan ? loan.currency : 'USD';
             document.getElementById('loan-original').value = loan ? loan.original : '';
-            document.getElementById('loan-balance').value = loan ? loan.balance : '';
+            // Al editar se muestra el saldo de hoy (con los intereses ya sumados)
+            const balanceInput = document.getElementById('loan-balance');
+            balanceInput.value = loan ? getCurrentLoanBalance(loan).toFixed(2) : '';
+            balanceInput.dataset.original = balanceInput.value;
+            document.getElementById('loan-rate').value = loan && loan.annualRate ? loan.annualRate : '';
             document.getElementById('loan-due').value = loan ? loan.dueDate : '';
             document.getElementById('loan-modal-title').textContent = loan ? 'Editar Préstamo' : 'Nuevo Préstamo';
             document.getElementById('loan-submit-btn').textContent = loan ? 'Guardar Cambios' : 'Registrar Préstamo';
@@ -1975,17 +2011,27 @@
             const balanceRaw = document.getElementById('loan-balance').value;
             const balance = balanceRaw === '' ? original : parseFloat(balanceRaw);
             const dueDate = document.getElementById('loan-due').value || '';
+            const annualRate = parseFloat(document.getElementById('loan-rate').value) || 0;
 
-            if (!name || !(original > 0) || isNaN(balance) || balance < 0) {
+            if (!name || !(original > 0) || isNaN(balance) || balance < 0 || annualRate < 0) {
                 alert('Completá la descripción, el monto del préstamo y un saldo pendiente válido.');
                 return;
             }
 
-            const data = { name, lender, currency, original, balance, dueDate };
+            const todayKey = getTodayKey();
+            const data = { name, lender, currency, original, dueDate, annualRate, lastUpdated: todayKey };
             if (editId) {
-                await db.collection('prestamos').doc(editId).update(data);
+                // Se "asientan" los intereses hasta hoy con la tasa vieja; desde hoy corre la nueva.
+                // Si se corrigió el saldo a mano, la diferencia se toma como capital (no como pérdida).
+                const loan = loans.find(l => l.id === editId);
+                const settled = loan ? getCurrentLoanBalance(loan, todayKey) : balance;
+                const balanceInput = document.getElementById('loan-balance');
+                const balanceChanged = balanceInput.value !== balanceInput.dataset.original;
+                const newBalance = balanceChanged ? balance : settled;
+                const principal = (loan ? loan.principal : newBalance) + (newBalance - settled);
+                await db.collection('prestamos').doc(editId).update({ ...data, balance: newBalance, principal });
             } else {
-                await db.collection('prestamos').add({ ...data, createdAt: new Date().toISOString(), payments: [] });
+                await db.collection('prestamos').add({ ...data, balance, principal: balance, createdAt: new Date().toISOString(), payments: [] });
             }
 
             toggleModal('loan-modal');
@@ -1995,8 +2041,8 @@
         async function deleteLoan(id) {
             const loan = loans.find(l => l.id === id);
             if (!loan) return;
-            const warning = loan.balance > 0.005
-                ? `¿Eliminar "${loan.name}"? Todavía tiene ${formatByCurrency(loan.balance, loan.currency)} pendientes, que van a dejar de restar de tu patrimonio.`
+            const warning = getCurrentLoanBalance(loan) > 0.005
+                ? `¿Eliminar "${loan.name}"? Todavía tiene ${formatByCurrency(getCurrentLoanBalance(loan), loan.currency)} pendientes, que van a dejar de restar de tu patrimonio.`
                 : `¿Eliminar el préstamo "${loan.name}"?`;
             if (!confirm(warning)) return;
             await db.collection('prestamos').doc(id).delete();
@@ -2010,7 +2056,7 @@
             document.getElementById('loan-pay-amount').value = '';
             document.getElementById('loan-pay-amount-label').textContent = `Monto pagado (${loan.currency})`;
             document.getElementById('loan-pay-info').textContent =
-                `${loan.name} — saldo pendiente ${formatByCurrency(loan.balance, loan.currency)}`;
+                `${loan.name} — saldo pendiente ${formatByCurrency(getCurrentLoanBalance(loan), loan.currency)}`;
             document.getElementById('loan-pay-source').innerHTML =
                 '<option value="externo">Otro medio (plata de afuera de la app)</option>' + buildCashOptions(null);
             updateLoanPayHint();
@@ -2046,8 +2092,9 @@
                 alert('Ingresá un monto válido.');
                 return;
             }
-            if (amount > loan.balance + 0.005) {
-                alert(`El pago supera el saldo pendiente (${formatByCurrency(loan.balance, loan.currency)}).`);
+            const todayBalance = getCurrentLoanBalance(loan);
+            if (amount > todayBalance + 0.005) {
+                alert(`El pago supera el saldo pendiente (${formatByCurrency(todayBalance, loan.currency)}).`);
                 return;
             }
 
@@ -2074,7 +2121,11 @@
                 cashHoldingId: source === 'externo' ? null : source
             };
             await db.collection('prestamos').doc(loan.id).update({
-                balance: Math.max(loan.balance - amount, 0),
+                // Se asientan los intereses hasta hoy y se descuenta el pago. El capital
+                // baja por el pago entero: lo pagado de intereses queda como pérdida.
+                balance: Math.max(todayBalance - amount, 0),
+                principal: loan.principal - amount,
+                lastUpdated: getTodayKey(),
                 payments: [...loan.payments, payment]
             });
 
@@ -2565,22 +2616,12 @@
             // Reordenamos por si la nueva fecha cambió la posición cronológica del asiento
             asset.history.sort((a, b) => new Date(a.date) - new Date(b.date));
 
-            // Recalcular posición total y costo promedio (Number() estricto para evitar NaN)
-            let totalShares = 0;
-            let totalCost = 0;
-
-            asset.history.forEach(h => {
-                const hShares = Number(h.shares) || 0;
-                const hPrice = Number(h.price) || 0;
-                if (h.type === 'buy') {
-                    totalShares += hShares;
-                    totalCost += (hShares * hPrice);
-                } else {
-                    totalShares -= hShares;
-                }
-            });
-
-            const newAvgPrice = totalShares > 0 ? (totalCost / totalShares) : 0;
+            const { shares: totalShares, avgPrice: newAvgPrice } = recomputePositionFromHistory(asset.history);
+            if (totalShares < -1e-9) {
+                alert('Con ese cambio quedarían unidades negativas (vendés más de lo que compraste). Revisá las cantidades.');
+                fetchPortfolio();
+                return;
+            }
 
             await db.collection("inversiones").doc(asset.id).update({
                 shares: totalShares,
@@ -2589,8 +2630,72 @@
             });
 
             toggleModal('edit-entry-modal');
-            openDetails(activeAssetIndex);
-            fetchPortfolio();
+            await reloadAndShowDetails(asset.id);
+        }
+
+        // Unidades y costo promedio a partir del historial (método de costo
+        // promedio: una venta no cambia el promedio de lo que queda).
+        function recomputePositionFromHistory(history) {
+            let shares = 0;
+            let cost = 0;
+            [...history].sort((a, b) => new Date(a.date) - new Date(b.date)).forEach(h => {
+                const hShares = Number(h.shares) || 0;
+                const hPrice = Number(h.price) || 0;
+                if (h.type === 'sell') {
+                    const ratio = shares > 0 ? Math.min(hShares / shares, 1) : 0;
+                    cost -= cost * ratio;
+                    shares -= hShares;
+                } else {
+                    shares += hShares;
+                    cost += hShares * hPrice;
+                }
+            });
+            if (Math.abs(shares) < 1e-12) shares = 0;
+            return { shares, avgPrice: shares > 0 ? cost / shares : 0 };
+        }
+
+        // Borra una compra o venta del historial (por ejemplo, una cargada por error)
+        // y recalcula las unidades y el costo promedio. No mueve plata del Cash.
+        async function deleteHistoryEntry() {
+            const entryIndex = parseInt(document.getElementById('edit-entry-index').value);
+            const asset = portfolio[activeAssetIndex];
+            const entry = asset && asset.history[entryIndex];
+            if (!entry) return;
+
+            const label = `${entry.type === 'sell' ? 'la venta' : 'la compra'} de ${entry.shares} ${asset.ticker} a ${formatMoney(Number(entry.price) || 0)}`;
+            const remaining = asset.history.filter((_, i) => i !== entryIndex);
+            const { shares, avgPrice } = recomputePositionFromHistory(remaining);
+
+            if (shares < -1e-9) {
+                alert('No se puede borrar: quedarían unidades negativas. Borrá primero la venta.');
+                return;
+            }
+            const removesPosition = remaining.length === 0 || shares <= 0;
+            const warning = removesPosition
+                ? `¿Borrar ${label}? Era lo único que quedaba de ${asset.ticker}, así que se elimina el activo. Esto no devuelve ni descuenta plata del Cash.`
+                : `¿Borrar ${label}? Esto no devuelve ni descuenta plata del Cash.`;
+            if (!confirm(warning)) return;
+
+            if (removesPosition) {
+                await db.collection('inversiones').doc(asset.id).delete();
+                toggleModal('edit-entry-modal');
+                document.getElementById('details-modal').classList.add('hidden');
+                fetchPortfolio();
+                return;
+            }
+
+            await db.collection('inversiones').doc(asset.id).update({ shares, avgPrice, history: remaining });
+            toggleModal('edit-entry-modal');
+            await reloadAndShowDetails(asset.id);
+        }
+
+        // Recarga todo y, si el detalle del activo estaba abierto, lo vuelve a
+        // dibujar con los datos nuevos (buscándolo por id: el orden de la tabla puede cambiar).
+        async function reloadAndShowDetails(assetId) {
+            await fetchPortfolio();
+            const detailsOpen = !document.getElementById('details-modal').classList.contains('hidden');
+            const idx = portfolio.findIndex(a => a.id === assetId);
+            if (detailsOpen && idx >= 0) openDetails(idx, true);
         }
 
         async function registerSale(e) {
@@ -2873,7 +2978,21 @@
             renderTable();
         }
 
-        // Gráfico con porcentajes adaptativos (oculta textos de menos del 8% para no amontonar)
+        // Lista debajo del gráfico con todos los activos, su color y su %, de mayor a menor
+        // (así se lee también lo que en el gráfico es una porción muy chica).
+        function renderDiversificationLegend(slices) {
+            const list = document.getElementById('diversification-legend');
+            if (!list) return;
+            const total = slices.reduce((acc, sl) => acc + sl.value, 0);
+            list.innerHTML = [...slices].sort((a, b) => b.value - a.value).map(sl => `
+                <li class="flex items-center gap-2 min-w-0">
+                    <span class="w-2.5 h-2.5 rounded-sm flex-shrink-0" style="background:${sl.color}"></span>
+                    <span class="text-gray-300 truncate">${escapeHtml(sl.label)}</span>
+                    <span class="ml-auto text-gray-400 tabular-nums">${total > 0 ? (sl.value * 100 / total).toFixed(1) : '0.0'}%</span>
+                </li>`).join('');
+        }
+
+        // Gráfico de torta: nombre y % dentro de las porciones grandes; el resto se lee en la lista de abajo
         function updateChart(labels, dataValues, colors) {
             const canvas = document.getElementById('portfolioChart');
             const ctx = canvas.getContext('2d');
@@ -2894,7 +3013,7 @@
                         // Colores consistentes por ticker (ver getColorForTicker), no por posición,
                         // así el color de cada activo no cambia al reordenar la tabla
                         backgroundColor: colors,
-                        borderWidth: 1,
+                        borderWidth: 2,
                         borderColor: '#1F2937'
                     }]
                 },
@@ -2910,19 +3029,24 @@
                         tooltip: {
                             callbacks: {
                                 label: function(context) {
-                                    return ' ' + formatMoney(context.parsed);
+                                    const dataArr = context.chart.data.datasets[0].data;
+                                    const sum = dataArr.reduce((acc, v) => acc + (Number(v) || 0), 0);
+                                    const pct = sum > 0 ? (context.parsed * 100 / sum).toFixed(1) : '0.0';
+                                    return ` ${formatMoney(context.parsed)} (${pct}%)`;
                                 }
                             }
                         },
                         datalabels: {
                             color: '#ffffff',
                             font: { weight: 'bold', size: 11 },
+                            textAlign: 'center',
                             formatter: (value, ctx) => {
                                 const dataArr = ctx.chart.data.datasets[0].data;
                                 const sum = dataArr.reduce((acc, v) => acc + (Number(v) || 0), 0);
                                 const pct = sum > 0 ? (value * 100 / sum) : 0;
-                                // Si la porción es menor al 8%, se oculta para no deformar el recuadro
-                                return pct >= 8 ? pct.toFixed(1) + "%" : '';
+                                // Las porciones chicas no llevan texto (no entra): se leen en la lista de abajo
+                                if (pct < 10) return '';
+                                return [ctx.chart.data.labels[ctx.dataIndex], pct.toFixed(1) + '%'];
                             },
                             anchor: 'center',
                             align: 'center'
@@ -3023,7 +3147,7 @@
             if (Math.abs(missingShares) > 1e-9) {
                 entries.unshift({ day: '0000-01-01', sell: missingShares < 0, shares: Math.abs(missingShares), price: Number(asset.avgPrice) || 0 });
             }
-            const state = { shares: 0, cost: 0, net: 0 };
+            const state = { shares: 0, cost: 0, net: 0, bought: 0 };
             let idx = 0;
 
             return (dayKey) => {
@@ -3038,6 +3162,7 @@
                         state.shares += e.shares;
                         state.cost += e.shares * e.price;
                         state.net += e.shares * e.price;
+                        state.bought += e.shares * e.price;
                     }
                 }
                 return state;
@@ -3118,7 +3243,15 @@
                 const otherInvested = a.otherInvested - pendingDca;
                 const totalValue = invest[i].value + otherInvested + otherGain;
                 const totalInvested = invest[i].net + otherInvested;
-                return { date: day, totalValue, totalInvested, gain: totalValue - totalInvested };
+                return {
+                    date: day,
+                    totalValue,
+                    totalInvested,
+                    gain: totalValue - totalInvested,
+                    // Sólo inversiones (acciones/cripto): valor y ganancia (valor - aportes netos)
+                    investValue: invest[i].value,
+                    investGain: invest[i].value - invest[i].net
+                };
             });
 
             series.forEach((point, i) => {
@@ -3127,6 +3260,109 @@
                 point.pct = prev && prev.totalValue > 0 ? (point.pnl / prev.totalValue) * 100 : null;
             });
             return series;
+        }
+
+        // ----- Tarjeta "Rendimiento" (Inversiones), con filtro de período -----
+        // Total: lo que ganaste con tus inversiones = valor actual - (compras - ventas).
+        // Incluye lo que ya ganaste o perdiste al vender (realizado), así coincide con
+        // "Ganancias" del gráfico de evolución. % = sobre todo lo que compraste.
+        // Períodos (1S, 1M, 1A, YTD): ganancia en ese período y su % encadenando el
+        // rendimiento de cada día (no lo mueven las compras ni las ventas).
+        let perfRange = 'TOTAL';
+
+        function setPerfRange(range) {
+            perfRange = range;
+            updatePerfRangeButtons();
+            updatePerformanceCard();
+        }
+
+        function updatePerfRangeButtons() {
+            document.querySelectorAll('.perf-btn').forEach(btn => {
+                const isActive = btn.id === `btn-perf-${perfRange}`;
+                btn.className = `perf-btn px-2 py-1 rounded-md transition ${isActive ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`;
+            });
+        }
+
+        function getPerfRangeStartKey(range) {
+            const todayKey = getTodayKey();
+            switch (range) {
+                case '1S': return addDaysToKey(todayKey, -7);
+                case '1M': return getRangeStartDate('1M');
+                case '1A': return getRangeStartDate('1A');
+                case 'YTD': return `${todayKey.slice(0, 4)}-01-01`;
+                default: return null;
+            }
+        }
+
+        function updatePerformanceCard() {
+            const pctEl = document.getElementById('inv-rendimiento-pct');
+            const amountEl = document.getElementById('inv-rendimiento-monto');
+            const detailEl = document.getElementById('inv-rendimiento-detalle');
+            if (!pctEl) return;
+
+            let amount = null;
+            let pct = null;
+            let detail = '';
+
+            if (perfRange === 'TOTAL') {
+                let value = 0;
+                let cost = 0;
+                let net = 0;
+                let bought = 0;
+                portfolio.forEach(asset => {
+                    const shares = Number(asset.shares) || 0;
+                    value += shares * (Number(asset.currentPrice) || 0);
+                    cost += shares * (Number(asset.avgPrice) || 0);
+                    const pos = buildPositionTimeline(asset)('9999-12-31');
+                    net += pos.net;
+                    bought += pos.bought;
+                });
+                amount = value - net;
+                pct = bought > 0 ? (amount / bought) * 100 : null;
+                const realized = cost - net;
+                detail = `No realizado ${formatSigned(value - cost)}`
+                    + (Math.abs(realized) >= 0.005 ? ` · Realizado (ventas) ${formatSigned(realized)}` : '');
+            } else if (pricesReady) {
+                const series = buildDailySeries();
+                const startKey = getPerfRangeStartKey(perfRange);
+                // Punto de partida: el cierre del día anterior al período (o el primer registro)
+                let baseIdx = series.findIndex(p => p.date >= startKey) - 1;
+                const clamped = baseIdx < 0;
+                if (clamped) baseIdx = 0;
+                const base = series[baseIdx];
+                const last = series[series.length - 1];
+                if (base && last && base !== last) {
+                    amount = last.investGain - base.investGain;
+                    let growth = 1;
+                    for (let i = baseIdx + 1; i < series.length; i++) {
+                        const prev = series[i - 1];
+                        const dayGain = series[i].investGain - prev.investGain;
+                        // Base del día: lo que había invertido al cierre anterior (o lo que entró ese día si no había nada)
+                        const dayBase = prev.investValue > 0 ? prev.investValue : series[i].investValue - dayGain;
+                        if (dayBase > 0) growth *= 1 + dayGain / dayBase;
+                    }
+                    pct = (growth - 1) * 100;
+                    const fromLabel = new Date(base.date + 'T00:00:00').toLocaleDateString('es-AR');
+                    detail = clamped
+                        ? `Desde el ${fromLabel} (primer registro: no hay datos anteriores)`
+                        : `Desde el cierre del ${fromLabel}`;
+                } else {
+                    detail = 'Todavía no hay datos de días anteriores';
+                }
+            } else {
+                detail = 'Cargando...';
+            }
+
+            const positive = (amount || 0) >= 0;
+            pctEl.textContent = pct != null ? `${positive ? '+' : ''}${pct.toFixed(2)}%` : '—';
+            pctEl.className = `text-3xl md:text-4xl font-bold mt-2 ${amount == null ? 'text-gray-400' : (positive ? 'text-green-500' : 'text-red-500')}`;
+            amountEl.textContent = amount != null ? formatSigned(amount) : '';
+            detailEl.textContent = detail;
+        }
+
+        // "+$12.34" / "-$12.34" (respeta el modo de saldos ocultos)
+        function formatSigned(amount) {
+            return amount >= 0 ? `+${formatMoney(amount)}` : `-${formatMoney(Math.abs(amount))}`;
         }
 
         // Tarjeta "Rendimiento Diario": ganancia de hoy vs. el cierre de ayer. Sólo
@@ -3379,13 +3615,7 @@
             if (invValorActual) invValorActual.textContent = formatMoney(totalCurrentValue);
             const invInvertidoRef = document.getElementById('inv-invertido-ref');
             if (invInvertidoRef) invInvertidoRef.textContent = `Invertido: ${formatMoney(totalInvested)}`;
-            const invRendimientoPct = document.getElementById('inv-rendimiento-pct');
-            if (invRendimientoPct) {
-                invRendimientoPct.textContent = `${plSign}${totalPLPercentage.toFixed(2)}%`;
-                invRendimientoPct.className = `text-3xl md:text-4xl font-bold mt-2 ${totalPL >= 0 ? 'text-green-500' : 'text-red-500'}`;
-            }
-            const invRendimientoMonto = document.getElementById('inv-rendimiento-monto');
-            if (invRendimientoMonto) invRendimientoMonto.textContent = `${plSign}${formatMoney(totalPL)}`;
+            updatePerformanceCard();
 
             // ----- Tarjeta "Patrimonio Total" (Panel General): posiciones + Cash -----
             // El Cash (capital + interés devengado) se suma al patrimonio; el capital
@@ -3424,29 +3654,26 @@
             // Tarjeta "Rendimiento Diario": % y $ de hoy vs. el cierre de ayer (sin depósitos ni retiros)
             updateDailyChangeCard();
 
-            // El gráfico se arma SIEMPRE a partir de una copia del portfolio ordenada
-            // alfabéticamente por ticker (no del orden actual de la tabla), para que
-            // las porciones mantengan una posición fija sin importar cómo el usuario
-            // haya ordenado la tabla principal.
-            const chartSource = [...portfolio].sort((a, b) =>
-                String(a.ticker || '').toUpperCase().localeCompare(String(b.ticker || '').toUpperCase())
-            );
+            // Porciones del gráfico: un activo por porción (los más chicos se agrupan
+            // en "Otros" si hay más de 8). Se dibujan en orden alfabético, así cada
+            // porción mantiene su lugar sin importar cómo esté ordenada la tabla.
+            let slices = portfolio
+                .map(asset => ({ label: asset.ticker, value: (Number(asset.shares) || 0) * (Number(asset.currentPrice) || 0) }))
+                .filter(sl => sl.value > 0);
+            if (slices.length > CHART_COLORS.length) {
+                slices.sort((a, b) => b.value - a.value);
+                const others = slices.slice(CHART_COLORS.length - 1);
+                slices = slices.slice(0, CHART_COLORS.length - 1);
+                slices.push({ label: 'Otros', value: others.reduce((acc, sl) => acc + sl.value, 0), isOthers: true });
+            }
+            slices.sort((a, b) => a.isOthers ? 1 : b.isOthers ? -1
+                : String(a.label).toUpperCase().localeCompare(String(b.label).toUpperCase()));
+            slices.forEach((sl, i) => { sl.color = sl.isOthers ? OTHERS_COLOR : CHART_COLORS[i]; });
 
-            let chartLabels = [];
-            let chartData = [];
-            let chartColors = [];
-
-            chartSource.forEach(asset => {
-                const shares = Number(asset.shares) || 0;
-                const currentPrice = Number(asset.currentPrice) || 0;
-                const currentValue = shares * currentPrice;
-
-                if (currentValue > 0) {
-                    chartLabels.push(asset.ticker);
-                    chartData.push(currentValue);
-                    chartColors.push(getTickerColor(asset.ticker));
-                }
-            });
+            const chartLabels = slices.map(sl => sl.label);
+            const chartData = slices.map(sl => sl.value);
+            const chartColors = slices.map(sl => sl.color);
+            renderDiversificationLegend(slices);
 
             updateChart(chartLabels, chartData, chartColors);
         }
@@ -3496,6 +3723,7 @@
 
         document.addEventListener('DOMContentLoaded', () => {
             updatePrivacyButton();
+            updatePerfRangeButtons();
             showPage('dashboard');
             setTxMode('usd');
             updateEvolutionModeButtons();
