@@ -679,6 +679,32 @@
                 <button onclick="toggleModal('details-modal')" class="text-gray-400 hover:text-white text-3xl">&times;</button>
             </div>
 
+            <!-- Gráfico propio del activo: % de ganancia o valor, día por día -->
+            <div class="bg-gray-900 p-4 rounded-lg mb-6 border border-gray-700">
+                <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
+                    <div>
+                        <p class="text-xs text-gray-400 uppercase tracking-wider font-semibold" id="asset-chart-title">Ganancia</p>
+                        <p class="text-2xl font-bold" id="asset-chart-headline">—</p>
+                        <p class="text-xs text-gray-400" id="asset-chart-sub"></p>
+                    </div>
+                    <div class="flex bg-gray-800 rounded-lg p-0.5 text-xs font-semibold">
+                        <button type="button" onclick="setAssetChartMode('gain')" id="btn-asset-mode-gain" class="px-3 py-1.5 rounded-md transition">Ganancia %</button>
+                        <button type="button" onclick="setAssetChartMode('value')" id="btn-asset-mode-value" class="px-3 py-1.5 rounded-md transition">Valor</button>
+                    </div>
+                </div>
+                <div class="flex flex-wrap gap-2 mb-3 text-xs">
+                    <button type="button" onclick="setAssetChartRange('1S')" id="btn-asset-range-1S" class="asset-range-btn px-3 py-1 rounded-full transition">1S</button>
+                    <button type="button" onclick="setAssetChartRange('1M')" id="btn-asset-range-1M" class="asset-range-btn px-3 py-1 rounded-full transition">1M</button>
+                    <button type="button" onclick="setAssetChartRange('1A')" id="btn-asset-range-1A" class="asset-range-btn px-3 py-1 rounded-full transition">1A</button>
+                    <button type="button" onclick="setAssetChartRange('YTD')" id="btn-asset-range-YTD" class="asset-range-btn px-3 py-1 rounded-full transition">YTD</button>
+                    <button type="button" onclick="setAssetChartRange('TOTAL')" id="btn-asset-range-TOTAL" class="asset-range-btn px-3 py-1 rounded-full transition">Total</button>
+                </div>
+                <div class="relative h-56">
+                    <canvas id="assetChart"></canvas>
+                </div>
+                <p class="text-[11px] text-gray-500 mt-2" id="asset-chart-note"></p>
+            </div>
+
             <!-- Formulario de Venta -->
             <div class="bg-gray-900 p-4 rounded-lg mb-6 border border-gray-700">
                 <h3 class="font-bold mb-3 text-red-400"><i class="fas fa-hand-holding-usd mr-2"></i>Registrar Venta / Reducción</h3>
@@ -2193,8 +2219,7 @@
 
             // Precios de cierre de los días anteriores (para reconstruir día a día
             // los días en que no se abrió la app). Usa caché local: sólo pide lo que falta.
-            const firstRecord = evolutionHistory.find(e => e.date < getTodayKey());
-            await loadHistoricalCloses(firstRecord ? firstRecord.date : null);
+            await loadHistoricalCloses(getFirstRecordKey());
             pricesReady = true;
 
             // Con los precios ya cargados, fijamos el orden según currentSort
@@ -2580,9 +2605,205 @@
                 }
             });
 
-            if (keepOpen) return;
+            if (keepOpen) {
+                renderAssetChart();
+                return;
+            }
             document.getElementById('sell-form').reset();
             toggleModal('details-modal');
+            // Cada vez que se abre: Ganancia % y Total
+            assetChartMode = 'gain';
+            assetChartRange = 'TOTAL';
+            renderAssetChart();
+        }
+
+        // =====================================================================
+        // GRÁFICO DE CADA ACTIVO (dentro del Detalle): un punto por día desde la
+        // primera compra, con las unidades de ese día según el historial y el
+        // precio de cierre de ese día (hoy: el precio actual).
+        //  - Ganancia %: (valor - lo pagado neto de ventas) / total comprado. Sin
+        //    ventas es el mismo % que la columna P/L de la tabla.
+        //  - Valor: lo que valía la posición ese día (sube también al comprar más).
+        // =====================================================================
+        let assetChartMode = 'gain';   // 'gain' | 'value'
+        let assetChartRange = 'TOTAL'; // '1S' | '1M' | '1A' | 'YTD' | 'TOTAL'
+        let myAssetChart = null;
+
+        function setAssetChartMode(mode) {
+            assetChartMode = mode;
+            renderAssetChart();
+        }
+
+        function setAssetChartRange(range) {
+            assetChartRange = range;
+            renderAssetChart();
+        }
+
+        function buildAssetSeries(asset) {
+            const todayKey = getTodayKey();
+            const pastRecords = evolutionHistory.filter(r => r.date && r.date < todayKey);
+            const startKey = getAssetStartKey(asset, getFirstRecordKey());
+            const positionAt = buildPositionTimeline(asset);
+            const priceAt = buildPriceLookup(asset, pastRecords);
+
+            // Días con compras/ventas cargadas a mano (las del DCA son diarias: no se marcan)
+            const trades = {};
+            (asset.history || []).forEach(h => {
+                if (h.synthetic || h.dca) return;
+                const day = utcDayKey(h.date);
+                if (day) trades[day] = trades[day] && trades[day] !== h.type ? 'both' : h.type;
+            });
+
+            const points = [];
+            for (let day = startKey; day <= todayKey; day = addDaysToKey(day, 1)) {
+                const pos = positionAt(day);
+                const isToday = day === todayKey;
+                const shares = isToday ? (Number(asset.shares) || 0) : pos.shares;
+                const price = isToday ? (Number(asset.currentPrice) || 0) : priceAt(day);
+                const value = shares * price;
+                const gain = value - pos.net;
+                points.push({
+                    date: day,
+                    value,
+                    gain,
+                    pct: pos.bought > 0 ? (gain / pos.bought) * 100 : null,
+                    trade: trades[day] || null
+                });
+            }
+            return points;
+        }
+
+        function updateAssetChartButtons() {
+            const activeMode = 'bg-blue-600 text-white';
+            const inactiveMode = 'text-gray-400 hover:text-white';
+            ['gain', 'value'].forEach(mode => {
+                document.getElementById(`btn-asset-mode-${mode}`).className =
+                    `px-3 py-1.5 rounded-md transition ${assetChartMode === mode ? activeMode : inactiveMode}`;
+            });
+            document.querySelectorAll('.asset-range-btn').forEach(btn => {
+                const isActive = btn.id === `btn-asset-range-${assetChartRange}`;
+                btn.className = `asset-range-btn px-3 py-1 rounded-full transition ${isActive ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`;
+            });
+        }
+
+        function renderAssetChart() {
+            const asset = portfolio[activeAssetIndex];
+            if (!asset) return;
+            updateAssetChartButtons();
+
+            const isGain = assetChartMode === 'gain';
+            const headline = document.getElementById('asset-chart-headline');
+            const sub = document.getElementById('asset-chart-sub');
+            const note = document.getElementById('asset-chart-note');
+            document.getElementById('asset-chart-title').textContent = isGain ? 'Ganancia' : 'Valor de la posición';
+
+            if (myAssetChart) {
+                myAssetChart.destroy();
+                myAssetChart = null;
+            }
+            if (!pricesReady) {
+                headline.textContent = '—';
+                headline.className = 'text-2xl font-bold text-gray-400';
+                sub.textContent = 'Cargando precios...';
+                note.textContent = '';
+                return;
+            }
+
+            const series = buildAssetSeries(asset);
+            const rangeStart = assetChartRange === 'TOTAL' ? null : getPerfRangeStartKey(assetChartRange);
+            let data = rangeStart ? series.filter(p => p.date >= rangeStart) : series;
+            if (data.length === 0) data = series.slice(-1);
+            const last = series[series.length - 1];
+
+            // Encabezado: situación de hoy (+ cuánto cambió la ganancia en el período elegido)
+            const positive = last.gain >= 0;
+            if (isGain) {
+                headline.textContent = last.pct != null ? `${positive ? '+' : ''}${last.pct.toFixed(2)}%` : '—';
+                headline.className = `text-2xl font-bold ${positive ? 'text-green-500' : 'text-red-500'}`;
+            } else {
+                headline.textContent = formatMoney(last.value);
+                headline.className = 'text-2xl font-bold text-white';
+            }
+            let subText = isGain ? `${formatSigned(last.gain)} · vale ${formatMoney(last.value)}` : `Ganancia ${formatSigned(last.gain)}`;
+            if (rangeStart) {
+                const baseIdx = series.indexOf(data[0]) - 1;
+                const base = series[Math.max(baseIdx, 0)];
+                subText += ` · en el período ${formatSigned(last.gain - base.gain)}`;
+            }
+            sub.textContent = subText;
+
+            const isCrypto = asset.type === 'crypto';
+            const hasCloses = !!historicalCloses[getTickerKey(asset.ticker)];
+            note.textContent = (hasCloses
+                ? `Precio de cierre real de cada día (${isCrypto ? 'CoinGecko' : 'Twelve Data'}).`
+                : 'No se pudo obtener el precio de cierre de cada día: los días sin precio se estiman entre los precios conocidos.')
+                + ' Los puntos marcan tus compras (verde) y ventas (rojo).';
+
+            const values = data.map(p => isGain ? p.pct : p.value);
+            const lineColor = isGain ? (positive ? '#10B981' : '#EF4444') : '#3987e5';
+            const tradeColor = t => t === 'sell' ? '#EF4444' : (t === 'both' ? '#F59E0B' : '#10B981');
+
+            myAssetChart = new Chart(document.getElementById('assetChart').getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels: data.map(p => formatEvolutionLabel(p.date)),
+                    datasets: [{
+                        data: values,
+                        borderColor: lineColor,
+                        backgroundColor: isGain ? 'transparent' : 'rgba(57, 135, 229, 0.12)',
+                        fill: !isGain,
+                        borderWidth: 2,
+                        tension: 0.2,
+                        spanGaps: true,
+                        pointRadius: data.map(p => p.trade ? 5 : 0),
+                        pointHoverRadius: data.map(p => p.trade ? 6 : 4),
+                        pointHitRadius: 8,
+                        pointBackgroundColor: data.map(p => p.trade ? tradeColor(p.trade) : lineColor),
+                        pointBorderColor: '#111827',
+                        pointBorderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { display: false },
+                        datalabels: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: (context) => {
+                                    const p = data[context.dataIndex];
+                                    const pctText = p.pct != null ? `${p.pct >= 0 ? '+' : ''}${p.pct.toFixed(2)}%` : '—';
+                                    return isGain
+                                        ? ` Ganancia: ${pctText} (${formatSigned(p.gain)})`
+                                        : ` Valor: ${formatMoney(p.value)} (${pctText})`;
+                                },
+                                afterLabel: (context) => {
+                                    const t = data[context.dataIndex].trade;
+                                    if (!t) return '';
+                                    return t === 'buy' ? ' Compraste ese día' : (t === 'sell' ? ' Vendiste ese día' : ' Compraste y vendiste ese día');
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: { color: '#9CA3AF', maxRotation: 0, autoSkip: true, maxTicksLimit: 6 },
+                            grid: { display: false }
+                        },
+                        y: {
+                            ticks: {
+                                color: '#9CA3AF',
+                                callback: (value) => isGain ? `${Number(value).toFixed(1)}%` : formatMoney(value)
+                            },
+                            // En Ganancia %, la línea del 0% se marca más fuerte
+                            grid: { color: (ctx) => isGain && ctx.tick && ctx.tick.value === 0 ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.06)' }
+                        }
+                    }
+                }
+            });
         }
 
         function openEditEntryModal(entryIndex) {
@@ -2801,12 +3022,12 @@
         // Reemplazá 'TU_API_KEY_AQUI' por la clave gratuita que te da Finnhub.io
         const FINNHUB_KEY = 'dahlkn9r01qvl9bpu4l0dahlkn9r01qvl9bpu4lg';
 
-        // (Opcional) Clave gratuita de twelvedata.com para traer el cierre REAL de
-        // cada día de las acciones (Finnhub gratis no da historial). Sin clave, los
-        // días sin registro de una acción se estiman entre los precios conocidos
-        // (compras/ventas, cierres anteriores guardados al entrar y el precio actual).
-        // Las cripto no la necesitan: su historial sale gratis de CoinGecko.
-        const TWELVEDATA_KEY = '';
+        // Clave gratuita de twelvedata.com para traer el cierre REAL de cada día de
+        // las acciones (Finnhub gratis no da historial). Si no responde, los días sin
+        // registro de una acción se estiman entre los precios conocidos (compras,
+        // cierres guardados al entrar y el precio actual). Las cripto no la
+        // necesitan: su historial sale gratis de CoinGecko.
+        const TWELVEDATA_KEY = '1f7c87842a104447b379133bb8997dba';
 
         const PRICE_CACHE_PREFIX = 'trackerpro:closes:';
 
@@ -2866,12 +3087,35 @@
             return closes;
         }
 
+        // Primer día que hay que mostrar de un activo: su primera compra registrada.
+        // Si el historial no explica todas sus unidades (posición cargada sin
+        // historial), desde el primer registro guardado (`firstRecordKey`), que es
+        // desde cuando sabemos que la tenías.
+        function getAssetStartKey(asset, firstRecordKey) {
+            let firstReal = null;
+            let historyShares = 0;
+            (asset.history || []).forEach(h => {
+                if (h.synthetic) return;
+                const day = utcDayKey(h.date);
+                if (day && (!firstReal || day < firstReal)) firstReal = day;
+                historyShares += (h.type === 'sell' ? -1 : 1) * (Number(h.shares) || 0);
+            });
+            const incomplete = !firstReal || Math.abs((Number(asset.shares) || 0) - historyShares) > 1e-9;
+            const candidates = [firstReal, incomplete ? firstRecordKey : null].filter(Boolean);
+            return candidates.length ? candidates.sort()[0] : getTodayKey();
+        }
+
+        function getFirstRecordKey() {
+            const first = evolutionHistory.find(e => e.date && e.date < getTodayKey());
+            return first ? first.date : null;
+        }
+
         // Carga (con caché en el navegador) los cierres diarios de cada activo desde
-        // `startKey` (o desde su primera compra) hasta ayer. Los cierres pasados no
-        // cambian, así que normalmente sólo se pide el día que falta.
-        async function loadHistoricalCloses(startKey) {
+        // su primer día (ver getAssetStartKey) hasta ayer. Los cierres pasados no
+        // cambian, así que normalmente sólo se pide el día que falta. Así los
+        // gráficos tienen el precio real de todos los días, aunque no se abra la app.
+        async function loadHistoricalCloses(firstRecordKey) {
             const yesterdayKey = addDaysToKey(getTodayKey(), -1);
-            if (!startKey || startKey > yesterdayKey) return;
 
             const seen = new Set();
             for (const asset of portfolio) {
@@ -2882,11 +3126,7 @@
                 const isCrypto = asset.type === 'crypto';
                 if (!isCrypto && !TWELVEDATA_KEY) continue;
 
-                const firstDay = (asset.history || []).reduce((min, h) => {
-                    const day = utcDayKey(h.date);
-                    return day && (!min || day < min) ? day : min;
-                }, null);
-                let needFrom = firstDay && firstDay > startKey ? firstDay : startKey;
+                let needFrom = getAssetStartKey(asset, firstRecordKey);
                 // CoinGecko gratis sólo da los últimos 365 días
                 if (isCrypto) {
                     const limit = addDaysToKey(getTodayKey(), -360);
