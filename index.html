@@ -1930,6 +1930,7 @@
                         // Momento en que se cargó en la app: los registros diarios guardados
                         // antes de esto no incluyen la deuda (ver buildDailySeries)
                         registeredAt: d.registeredAt || d.createdAt || null,
+                        hasRegisteredAt: !!d.registeredAt,
                         payments: Array.isArray(d.payments) ? d.payments : []
                     });
                 });
@@ -1948,6 +1949,31 @@
             const days = Math.max(daysBetweenDates(loan.lastUpdated, todayKey), 0);
             const dailyRate = (Number(loan.annualRate) || 0) / 100 / 365;
             return (Number(loan.balance) || 0) * Math.pow(1 + dailyRate, days);
+        }
+
+        // Momento a partir del cual los registros diarios guardados ya incluyen la
+        // deuda. Los préstamos cargados antes de existir este dato (o borrados y
+        // vueltos a cargar) no lo tienen: se busca, entre el día en que se sacó y
+        // el día en que se cargó, el registro en que lo "invertido" bajó de golpe
+        // por el monto del préstamo (es cuando apareció la deuda).
+        function getLoanRegisteredTs(loan, takenDate = loan.takenDate) {
+            const fallback = Date.parse(loan.registeredAt || '');
+            if (loan.hasRegisteredAt) return fallback;
+            const createdDay = utcDayKey(loan.createdAt) || getTodayKey();
+            const amount = toUSD(loan.original, loan.currency);
+            let best = null;
+            for (let i = 1; i < evolutionHistory.length; i++) {
+                const prev = evolutionHistory[i - 1];
+                const cur = evolutionHistory[i];
+                if (cur.date < takenDate || cur.date > createdDay) continue;
+                const drop = prev.totalInvested - cur.totalInvested;
+                if (!best || drop > best.drop) best = { drop, cur };
+            }
+            if (best && amount > 0 && best.drop >= amount * 0.5) {
+                const ts = Date.parse(best.cur.timestamp || '') || Date.parse(best.cur.date + 'T23:59:59Z');
+                return Math.min(ts - 60000, isNaN(fallback) ? Infinity : fallback);
+            }
+            return fallback;
         }
 
         function getDebtTotalUSD() {
@@ -2073,7 +2099,13 @@
                 const balanceChanged = balanceInput.value !== balanceInput.dataset.original;
                 const newBalance = balanceChanged ? balance : settled;
                 const principal = (loan ? loan.principal : newBalance) + (newBalance - settled);
-                await db.collection('prestamos').doc(editId).update({ ...data, balance: newBalance, principal });
+                const extra = {};
+                if (loan && !loan.hasRegisteredAt) {
+                    // Se guarda cuándo apareció la deuda en los registros (ver getLoanRegisteredTs)
+                    const ts = getLoanRegisteredTs(loan, takenDate);
+                    if (!isNaN(ts)) extra.registeredAt = new Date(ts).toISOString();
+                }
+                await db.collection('prestamos').doc(editId).update({ ...data, ...extra, balance: newBalance, principal });
             } else {
                 // Sin saldo cargado, el interés corre desde el día en que se sacó
                 const lastUpdated = balanceRaw === '' && annualRate > 0 ? takenDate : todayKey;
@@ -3492,7 +3524,7 @@
             // (del valor y de lo invertido, así no cambia la ganancia), para que el
             // gráfico no muestre una caída falsa el día en que se cargó.
             const lateLoans = loans
-                .map(l => ({ from: l.takenDate, registeredTs: Date.parse(l.registeredAt || ''), amount: toUSD(l.original, l.currency) }))
+                .map(l => ({ from: l.takenDate, registeredTs: getLoanRegisteredTs(l), amount: toUSD(l.original, l.currency) }))
                 .filter(l => l.from && !isNaN(l.registeredTs) && l.amount > 0);
 
             let ai = 0;
