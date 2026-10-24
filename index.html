@@ -634,6 +634,11 @@
                     <input type="number" step="any" min="0" id="loan-rate" placeholder="0" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500">
                     <p class="text-[11px] text-gray-500 mt-1">El saldo pendiente va sumando este interés todos los días.</p>
                 </div>
+                <div class="mb-4">
+                    <label class="block text-sm text-gray-400 mb-1">¿Cuándo lo sacaste? (opcional)</label>
+                    <input type="date" id="loan-taken" onclick="this.showPicker?.()" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500 cursor-pointer">
+                    <p class="text-[11px] text-gray-500 mt-1">Si lo dejás vacío, se toma el día en que lo cargás. Si lo cargás tarde, poné la fecha real: así el gráfico de evolución cuenta la deuda desde ese día y no muestra una caída que no existió.</p>
+                </div>
                 <div class="mb-6">
                     <label class="block text-sm text-gray-400 mb-1">Vencimiento (opcional)</label>
                     <input type="date" id="loan-due" onclick="this.showPicker?.()" class="w-full bg-gray-900 text-white px-4 py-3 rounded-lg border border-gray-600 focus:outline-none focus:border-blue-500 cursor-pointer">
@@ -1920,6 +1925,11 @@
                         principal: d.principal != null ? (Number(d.principal) || 0) : (Number(d.balance) || 0),
                         dueDate: d.dueDate || '',
                         createdAt: d.createdAt || new Date().toISOString().slice(0, 10),
+                        // Día en que se sacó el préstamo (puede ser anterior a cuando se cargó)
+                        takenDate: d.takenDate || utcDayKey(d.createdAt) || getTodayKey(),
+                        // Momento en que se cargó en la app: los registros diarios guardados
+                        // antes de esto no incluyen la deuda (ver buildDailySeries)
+                        registeredAt: d.registeredAt || d.createdAt || null,
                         payments: Array.isArray(d.payments) ? d.payments : []
                     });
                 });
@@ -1972,9 +1982,8 @@
                 const rateNote = loan.annualRate > 0
                     ? `<p class="text-xs text-gray-500 mt-1">Interés: ${loan.annualRate}% anual${accrued > 0.005 && !settled ? ` · ${formatByCurrency(accrued, loan.currency)} de intereses sin pagar` : ''}</p>`
                     : '';
-                const dueLabel = loan.dueDate
-                    ? ` · vence ${new Date(loan.dueDate + 'T00:00:00').toLocaleDateString('es-AR')}`
-                    : '';
+                const dueLabel = (loan.takenDate ? ` · sacado el ${new Date(loan.takenDate + 'T00:00:00').toLocaleDateString('es-AR')}` : '')
+                    + (loan.dueDate ? ` · vence ${new Date(loan.dueDate + 'T00:00:00').toLocaleDateString('es-AR')}` : '');
 
                 container.innerHTML += `
                     <div class="bg-gray-900 border border-gray-700 rounded-lg p-4">
@@ -2023,6 +2032,7 @@
             balanceInput.value = loan ? getCurrentLoanBalance(loan).toFixed(2) : '';
             balanceInput.dataset.original = balanceInput.value;
             document.getElementById('loan-rate').value = loan && loan.annualRate ? loan.annualRate : '';
+            document.getElementById('loan-taken').value = loan ? loan.takenDate : '';
             document.getElementById('loan-due').value = loan ? loan.dueDate : '';
             document.getElementById('loan-modal-title').textContent = loan ? 'Editar Préstamo' : 'Nuevo Préstamo';
             document.getElementById('loan-submit-btn').textContent = loan ? 'Guardar Cambios' : 'Registrar Préstamo';
@@ -2040,6 +2050,7 @@
             const balance = balanceRaw === '' ? original : parseFloat(balanceRaw);
             const dueDate = document.getElementById('loan-due').value || '';
             const annualRate = parseFloat(document.getElementById('loan-rate').value) || 0;
+            const takenInput = document.getElementById('loan-taken').value;
 
             if (!name || !(original > 0) || isNaN(balance) || balance < 0 || annualRate < 0) {
                 alert('Completá la descripción, el monto del préstamo y un saldo pendiente válido.');
@@ -2047,7 +2058,12 @@
             }
 
             const todayKey = getTodayKey();
-            const data = { name, lender, currency, original, dueDate, annualRate, lastUpdated: todayKey };
+            if (takenInput && takenInput > todayKey) {
+                alert('La fecha en que sacaste el préstamo no puede ser futura.');
+                return;
+            }
+            const takenDate = takenInput || todayKey;
+            const data = { name, lender, currency, original, dueDate, annualRate, takenDate, lastUpdated: todayKey };
             if (editId) {
                 // Se "asientan" los intereses hasta hoy con la tasa vieja; desde hoy corre la nueva.
                 // Si se corrigió el saldo a mano, la diferencia se toma como capital (no como pérdida).
@@ -2059,7 +2075,10 @@
                 const principal = (loan ? loan.principal : newBalance) + (newBalance - settled);
                 await db.collection('prestamos').doc(editId).update({ ...data, balance: newBalance, principal });
             } else {
-                await db.collection('prestamos').add({ ...data, balance, principal: balance, createdAt: new Date().toISOString(), payments: [] });
+                // Sin saldo cargado, el interés corre desde el día en que se sacó
+                const lastUpdated = balanceRaw === '' && annualRate > 0 ? takenDate : todayKey;
+                const nowIso = new Date().toISOString();
+                await db.collection('prestamos').add({ ...data, lastUpdated, balance, principal: balance, createdAt: nowIso, registeredAt: nowIso, payments: [] });
             }
 
             toggleModal('loan-modal');
@@ -3468,6 +3487,14 @@
                 }
             }));
 
+            // Préstamos cargados tarde: desde el día en que se sacaron hasta que se
+            // cargaron, los registros guardados no incluyen la deuda. Se descuenta acá
+            // (del valor y de lo invertido, así no cambia la ganancia), para que el
+            // gráfico no muestre una caída falsa el día en que se cargó.
+            const lateLoans = loans
+                .map(l => ({ from: l.takenDate, registeredTs: Date.parse(l.registeredAt || ''), amount: toUSD(l.original, l.currency) }))
+                .filter(l => l.from && !isNaN(l.registeredTs) && l.amount > 0);
+
             let ai = 0;
             const series = days.map((day, i) => {
                 while (ai + 1 < anchors.length && anchors[ai + 1].date <= day) ai++;
@@ -3482,7 +3509,13 @@
                         if (buy.day <= day && buy.executedAt > a.ts) pendingDca += buy.amount;
                     });
                 }
-                const otherInvested = a.otherInvested - pendingDca;
+                let missingDebt = 0;
+                if (day !== todayKey) {
+                    lateLoans.forEach(l => {
+                        if (l.from <= day && a.ts < l.registeredTs) missingDebt += l.amount;
+                    });
+                }
+                const otherInvested = a.otherInvested - pendingDca - missingDebt;
                 const totalValue = invest[i].value + otherInvested + otherGain;
                 const totalInvested = invest[i].net + otherInvested;
                 return {
